@@ -106,3 +106,15 @@ The resume command is `kimi --session <session-id>`.
 ## 4. If results differ
 
 Check that the data root points to the directory containing OpenCode's `opencode.db` or Kimi's `sessions/` and `session_index.jsonl`. Use `--all` to avoid the normal date window hiding older sessions. If session IDs or counts differ from the native CLI, keep the raw JSON and session files private; share only the CLI versions, sanitized error message, and the specific mismatching session ID/count needed to diagnose it.
+
+## Future optimization: large OpenCode databases
+
+The current OpenCode reader is correctness-oriented, not optimized for very large databases. It reads the complete SQLite file into memory, and table scans currently materialize the scanned rows before processing them. Listing also scans message tables to derive first/last-prompt metadata. On databases over 100 MB, this can increase both peak memory use and scan time; removing display-only counts does not avoid that work.
+
+Potential follow-up work:
+
+- Make SQLite table scans stream rows rather than accumulating a complete `[][]Value` in memory.
+- Reduce unnecessary row/column decoding while preserving prompt extraction and compatibility with both the durable and legacy message tables.
+- Load lightweight session metadata for the initial list, then defer full prompt/detail parsing until a session is selected. This would need to preserve current filtering, JSON output, and preview behavior.
+
+These are future ideas, not implemented optimizations. Benchmark against a representative large database and verify output parity before adopting them.
