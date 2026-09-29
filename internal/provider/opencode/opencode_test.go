@@ -146,7 +146,7 @@ func TestLegacyOnlySession(t *testing.T) {
 		t.Error("synthetic part text leaked as prompt")
 	}
 	if leg.AsstCount != 1 {
-		t.Errorf("assistant count = %d, want 1", leg.AsstCount)
+		t.Errorf("assistant count = %d, want 1 (tool-call continuation should stay in the same turn)", leg.AsstCount)
 	}
 	if leg.FirstTS != "2026-04-15T06:00:00Z" || leg.LastTS != "2026-04-15T06:05:00Z" {
 		t.Errorf("timestamps = %q .. %q", leg.FirstTS, leg.LastTS)

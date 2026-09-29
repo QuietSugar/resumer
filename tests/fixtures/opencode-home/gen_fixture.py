@@ -154,13 +154,20 @@ def main(path):
          [("part_e1", "text", "legacy only first prompt", False)]),
         ("msg_e2", SES["eeee"], "assistant", T["eeee_a1"],
          [("part_e2", "text", "legacy only reply", False)]),
+        # Multiple assistant messages can form one user turn (e.g. tool call
+        # continuations); parentID links them back to the same user message.
+        ("msg_e2b", SES["eeee"], "assistant", T["eeee_a1"] + 1000,
+         [("part_e2b", "text", "legacy only tool continuation", False)]),
         ("msg_e3", SES["eeee"], "user", T["eeee_p2"],
          [("part_e3", "text", "legacy only second prompt", False),
           ("part_e4", "text", "synthetic legacy prompt that must not leak", True)]),
     ]
     for mid, sid, role, ts, parts in legacy:
+        message_data = {"role": role}
+        if mid in ("msg_e2", "msg_e2b"):
+            message_data["parentID"] = "msg_e1"
         db.execute("INSERT INTO message VALUES (?,?,?,?,?)",
-                   (mid, sid, ts, ts + 1000, json.dumps({"role": role})))
+                   (mid, sid, ts, ts + 1000, json.dumps(message_data)))
         for pid, ptyp, ptext, synthetic in parts:
             db.execute("INSERT INTO part VALUES (?,?,?,?,?,?)",
                        (pid, mid, sid, ts, ts + 1000,

@@ -121,14 +121,14 @@ func msToTS(ms int64) string {
 	return time.Unix(ms/1000, 0).UTC().Format(time.RFC3339)
 }
 
-// promptAgg accumulates first/last user prompts and assistant counts for one
-// session. Timestamps are epoch ms — comparable as ints.
+// promptAgg accumulates first/last user prompts and assistant-turn counts for
+// one session. Timestamps are epoch ms — comparable as ints.
 type promptAgg struct {
 	firstTS, lastTS int64
 	first, last     string
 	asst            int
 	seenP           map[string]bool // "ts\x00text" — dedupes dual-projected rows
-	seenA           map[int64]bool  // assistant turn timestamps
+	seenA           map[string]bool // assistant turn identity (parent user ID, timestamp fallback)
 }
 
 func (a *promptAgg) addPrompt(ts int64, text string) {
@@ -153,14 +153,18 @@ func (a *promptAgg) addPrompt(ts int64, text string) {
 	}
 }
 
-func (a *promptAgg) addAssistantAt(ts int64) {
+func (a *promptAgg) addAssistantTurn(parentID string, ts int64) {
 	if a.seenA == nil {
-		a.seenA = map[int64]bool{}
+		a.seenA = map[string]bool{}
 	}
-	if a.seenA[ts] {
+	key := "parent:" + parentID
+	if parentID == "" {
+		key = "time:" + strconv.FormatInt(ts, 10)
+	}
+	if a.seenA[key] {
 		return
 	}
-	a.seenA[ts] = true
+	a.seenA[key] = true
 	a.asst++
 }
 
@@ -170,9 +174,10 @@ func (a *promptAgg) addAssistantAt(ts int64) {
 // session_message, while the v1-compat layer keeps writing message+part — and
 // messages that predate an upgrade live only in the legacy pair (there is no
 // backfill migration). Prompts are therefore unioned across the two families
-// and deduped on (timestamp, text) for prompts and timestamp for assistant
-// turns; for the same logical message both projections store identical
-// values. Tolerates missing tables: pre-1.1 JSON-era installs have no db.
+// and deduped on (timestamp, text). Assistant messages are grouped by parent
+// user-message ID so tool-call continuations count as one turn; timestamps are
+// the fallback for older rows without parentID. Tolerates missing tables:
+// pre-1.1 JSON-era installs have no db.
 func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 	out := map[string]*promptAgg{}
 	agg := func(id string) *promptAgg {
@@ -193,8 +198,9 @@ func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 				return nil
 			}
 			var payload struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
+				Type     string `json:"type"`
+				Text     string `json:"text"`
+				ParentID string `json:"parentID"`
 			}
 			if raw, ok := r.Str("data"); ok && raw != "" {
 				_ = json.Unmarshal([]byte(raw), &payload)
@@ -206,7 +212,7 @@ func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 			case "user":
 				agg(ses).addPrompt(ts, strings.TrimSpace(payload.Text))
 			case "assistant":
-				agg(ses).addAssistantAt(ts)
+				agg(ses).addAssistantTurn(payload.ParentID, ts)
 			}
 			return nil
 		})
@@ -229,7 +235,8 @@ func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 				return nil
 			}
 			var payload struct {
-				Role string `json:"role"`
+				Role     string `json:"role"`
+				ParentID string `json:"parentID"`
 			}
 			if raw, ok := r.Str("data"); ok && raw != "" {
 				_ = json.Unmarshal([]byte(raw), &payload)
@@ -240,7 +247,7 @@ func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 			ts, _ := r.Int("time_created")
 			msgs[id] = legacyMsg{ses: ses, role: payload.Role, ts: ts}
 			if payload.Role == "assistant" {
-				agg(ses).addAssistantAt(ts)
+				agg(ses).addAssistantTurn(payload.ParentID, ts)
 			}
 			return nil
 		})
@@ -364,6 +371,7 @@ type jsonPart struct {
 type jsonMessageFile struct {
 	ID       string     `json:"id"`
 	Role     string     `json:"role"`
+	ParentID string     `json:"parentID"`
 	Parts    []jsonPart `json:"parts"`
 	Metadata struct {
 		Time struct {
@@ -436,17 +444,17 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 						}
 					}
 				case "assistant":
-					pa.addAssistantAt(ts)
+					pa.addAssistantTurn(msg.ParentID, ts)
 					if t := msg.Metadata.Assistant.Tokens; t != nil {
 						tok.Input += int64(t.Input)
 						tok.Output += int64(t.Output)
 						tok.CacheRead += int64(t.Cache.Read)
 						tok.CacheCreate += int64(t.Cache.Write)
-						tok.Turns++
 					}
 				}
 			}
 		}
+		tok.Turns = int64(pa.asst)
 
 		var tokens *session.TokenUsage
 		if tok.Turns > 0 || tok.Input > 0 || tok.Output > 0 {
