@@ -1,0 +1,8 @@
+{
+  "id": "ses_jjjjjjjjjjjjjjjjjjjjjjjjjjjj",
+  "projectID": "proj-json",
+  "directory": "/tmp/resumer-fixtures/oc-json",
+  "title": "OpenCode JSON Fixture",
+  "version": "1.0.0",
+  "time": { "created": 1776226800000, "updated": 1776227100000 }
+}

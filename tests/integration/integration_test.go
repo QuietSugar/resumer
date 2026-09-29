@@ -59,6 +59,8 @@ func fixtureEnv(t *testing.T) []string {
 		"RESUMER_CODEX_BIN=codex",
 		"RESUMER_KIMI_HOME=" + filepath.Join(repoRoot, "tests", "fixtures", "kimi-home"),
 		"RESUMER_KIMI_BIN=kimi",
+		"RESUMER_OPENCODE_DATA=" + filepath.Join(repoRoot, "tests", "fixtures", "opencode-home"),
+		"RESUMER_OPENCODE_BIN=opencode",
 		// Sentinel pre-burned via XDG redirect so the first-run star message
 		// doesn't interleave with exec assertions.
 		"XDG_STATE_HOME=" + t.TempDir(),
@@ -76,6 +78,10 @@ func materializeFixtureCwds(t *testing.T) {
 		"/tmp/resumer-fixtures/obsidian path with space/vault",
 		"/tmp/resumer-fixtures/kimi-one",
 		"/tmp/resumer-fixtures/kimi-two",
+		"/tmp/resumer-fixtures/oc-one",
+		"/tmp/resumer-fixtures/oc-two",
+		"/tmp/resumer-fixtures/oc-three",
+		"/tmp/resumer-fixtures/oc-json",
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
@@ -381,5 +387,29 @@ func TestKimiSelectExec(t *testing.T) {
 	pwdRE := regexp.MustCompile(`pwd=(/private)?/tmp/resumer-fixtures/kimi-two`)
 	if !pwdRE.MatchString(log) {
 		t.Errorf("expected exec from the session workDir, log: %q", log)
+	}
+}
+
+// --- opencode selection end-to-end ---
+
+func TestOpenCodeSelectExec(t *testing.T) {
+	materializeFixtureCwds(t)
+	logPath := filepath.Join(t.TempDir(), "opencode-mock.log")
+	env := append(fixtureEnv(t), "OPENCODE_MOCK_LOG="+logPath)
+
+	r := startPicker(t, env, "--source=opencode", "--all")
+	r.waitFor(t, "[oc]", 5*time.Second)
+	// Top row is ses_ddd (06:21, oc-three) — newest visible opencode session
+	// (archived and child fixtures are filtered out).
+	r.send("\r")
+	r.waitExit(t, 5*time.Second)
+
+	log := waitForFile(t, logPath, 5*time.Second)
+	if !strings.Contains(log, "args=--session ses_dddddddddddddddddddddddddddd") {
+		t.Errorf("expected opencode --session of most-recent session, log: %q", log)
+	}
+	pwdRE := regexp.MustCompile(`pwd=(/private)?/tmp/resumer-fixtures/oc-three`)
+	if !pwdRE.MatchString(log) {
+		t.Errorf("expected exec from the session directory, log: %q", log)
 	}
 }

@@ -22,6 +22,7 @@ var BadgeANSI = map[string]string{
 	"claude-code": "\x1b[32m", // green
 	"codex":       "\x1b[36m", // cyan
 	"kimi-code":   "\x1b[35m", // magenta
+	"opencode":    "\x1b[34m", // blue
 }
 
 const (
@@ -33,7 +34,7 @@ func noColor() bool {
 	return os.Getenv("NO_COLOR") != ""
 }
 
-// Badge renders a fixed-width badge like "[cc]   ", "[codex]" or "[kimi] ", 7 visible cols.
+// Badge renders a fixed-width badge like "[cc]   ", "[codex]", "[kimi] " or "[oc]   ", 7 visible cols.
 func Badge(source, ansi string) string {
 	text := "[" + source + "]"
 	switch source {
@@ -41,6 +42,8 @@ func Badge(source, ansi string) string {
 		text = "[cc]"
 	case "kimi-code":
 		text = "[kimi]"
+	case "opencode":
+		text = "[oc]"
 	}
 	padded := textutil.PadDisplay(text, 7)
 	if noColor() {
