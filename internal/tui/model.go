@@ -30,6 +30,10 @@ var (
 	previewStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder(), true, false, false, false).
 			BorderForeground(lipgloss.Color("8"))
+	tipsStyle = lipgloss.NewStyle().
+			PaddingLeft(1).
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(lipgloss.Color("8"))
 )
 
 type loadedMsg struct {
@@ -61,6 +65,7 @@ type Model struct {
 	noSessions bool
 	width      int
 	height     int
+	tipsWidth  int
 	ready      bool
 }
 
@@ -187,7 +192,15 @@ func (m *Model) resize() {
 		previewH = 3
 	}
 	m.list.SetSize(m.width, listH)
-	m.preview.Width = m.width
+	m.tipsWidth = 0
+	previewW := m.width
+	// Keep the fixed-width detail box intact; use the otherwise empty right
+	// side for tips only when the terminal can fit both panes comfortably.
+	if m.width >= 112 {
+		m.tipsWidth = 36
+		previewW = m.width - m.tipsWidth - 2
+	}
+	m.preview.Width = previewW
 	m.preview.Height = previewH
 	m.ready = true
 }
@@ -288,6 +301,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func tipsForSource(source string) string {
+	lines := []string{
+		"Session deletion",
+		"resumer only browses and resumes; it does not delete sessions.",
+		"",
+	}
+	switch source {
+	case "opencode":
+		lines = append(lines,
+			"OpenCode",
+			"opencode session delete",
+			"<sessionID>",
+		)
+	case "kimi-code":
+		lines = append(lines,
+			"Kimi Code",
+			"Open its session picker,",
+			"select a session, press",
+			"Ctrl+X, then confirm.",
+		)
+	default:
+		lines = append(lines,
+			"Use this Agent's own CLI/TUI",
+			"session manager. The exact",
+			"steps differ by Agent/version.",
+		)
+	}
+	lines = append(lines,
+		"",
+		"Check the session ID first.",
+		"Deletion may be irreversible.",
+	)
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) View() string {
 	if !m.ready {
 		return "loading…"
@@ -309,7 +357,16 @@ func (m Model) View() string {
 		b.WriteString(warnStyle.Render(w) + "\n")
 	}
 	b.WriteString(m.list.View() + "\n")
-	b.WriteString(previewStyle.Width(m.width).Render(m.preview.View()))
+	preview := m.preview.View()
+	if m.tipsWidth > 0 {
+		source := ""
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			source = item.s.Source
+		}
+		tips := tipsStyle.Width(m.tipsWidth - 1).Height(m.preview.Height).Render(tipsForSource(source))
+		preview = lipgloss.JoinHorizontal(lipgloss.Top, preview, "  ", tips)
+	}
+	b.WriteString(previewStyle.Width(m.width).Render(preview))
 	return b.String()
 }
 

@@ -84,6 +84,36 @@ func TestRowDelegateRendersTitleWithoutFirstPrompt(t *testing.T) {
 	}
 }
 
+func TestTipsPaneUsesSelectedProviderAndAdaptsToWidth(t *testing.T) {
+	m := NewModel([]provider.Provider{&refreshProvider{}}, session.Filters{})
+	m.width, m.height = 120, 30
+	m.resize()
+	m.list.SetItems([]list.Item{sessionItem{s: session.Session{Source: "opencode", SessionID: "id"}}})
+	m.preview.SetContent("session detail")
+	wideView := m.View()
+	if !strings.Contains(wideView, "opencode session delete") {
+		t.Fatalf("wide view should show provider-specific tips:\n%s", wideView)
+	}
+
+	m.width = 90
+	m.resize()
+	if m.tipsWidth != 0 {
+		t.Fatalf("narrow layout tips width = %d, want hidden tips pane", m.tipsWidth)
+	}
+}
+
+func TestTipsForSourceExplainsProviderSpecificDeletion(t *testing.T) {
+	if got := tipsForSource("opencode"); !strings.Contains(got, "opencode session delete") {
+		t.Fatalf("OpenCode tips are missing delete command: %q", got)
+	}
+	if got := tipsForSource("kimi-code"); !strings.Contains(got, "Ctrl+X") {
+		t.Fatalf("Kimi tips are missing picker shortcut: %q", got)
+	}
+	if got := tipsForSource("codex"); !strings.Contains(got, "differ by Agent/version") {
+		t.Fatalf("generic tips should warn that deletion differs: %q", got)
+	}
+}
+
 func TestFormatLastActivity(t *testing.T) {
 	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
