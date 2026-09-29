@@ -11,12 +11,6 @@ back in the conversation.
 ## Install
 
 ```bash
-brew install jin-ttao/tap/resumer
-```
-
-or one line without Homebrew:
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/jin-ttao/resumer/main/install.sh | sh
 ```
 
@@ -75,8 +69,7 @@ The test suite includes PTY-driven integration tests that exercise the real
 TUI end to end (picker → filter → select → exec) against fixtures in
 `tests/fixtures/`.
 
-Releases are automated: pushing a `v*` tag builds binaries via goreleaser and
-updates the Homebrew tap.
+Releases are automated: pushing a `v*` tag builds binaries via goreleaser.
 
 Roadmap: Gemini provider · Windows support.
 
