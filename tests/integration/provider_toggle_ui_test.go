@@ -19,12 +19,12 @@ func TestProviderToggleUI(t *testing.T) {
 	// Bare `resumer provider` on a TTY opens the checkbox screen.
 	r := startPicker(t, env, "provider")
 	r.waitFor(t, "resumer providers", 5*time.Second)
-	r.waitFor(t, "[ ] opencode", 5*time.Second)
+	r.waitFor(t, "[*] opencode", 5*time.Second)
 
 	// claude-code → codex → kimi-code → opencode: three downs, toggle, save.
 	r.send("\x1b[B\x1b[B\x1b[B")
 	r.send(" ")
-	r.waitFor(t, "[x] opencode", 5*time.Second)
+	r.waitFor(t, "[ ] opencode", 5*time.Second)
 	r.send("\r")
 	r.waitExit(t, 5*time.Second)
 
@@ -50,7 +50,7 @@ func TestProviderToggleUI(t *testing.T) {
 	// Re-open and cancel: config must stay untouched.
 	before, _ := os.ReadFile(cfgPath)
 	r2 := startPicker(t, env, "provider")
-	r2.waitFor(t, "[x] opencode", 5*time.Second) // persisted state rendered
+	r2.waitFor(t, "[ ] opencode", 5*time.Second) // persisted state rendered
 	r2.send("\x1b")                              // esc
 	r2.waitExit(t, 5*time.Second)
 	after, _ := os.ReadFile(cfgPath)

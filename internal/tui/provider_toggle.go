@@ -79,9 +79,9 @@ func (m toggleModel) View() string {
 	b.WriteString(toggleTitleStyle.Render("resumer providers"))
 	b.WriteString("  " + helpStyle.Render("space toggle · enter save · esc cancel") + "\n")
 	for i, r := range m.rows {
-		cursor, box := "  ", "[ ] "
+		cursor, box := "  ", "[*] "
 		if r.off {
-			box = "[x] "
+			box = "[ ] "
 		}
 		if i == m.cursor {
 			cursor = "› "
