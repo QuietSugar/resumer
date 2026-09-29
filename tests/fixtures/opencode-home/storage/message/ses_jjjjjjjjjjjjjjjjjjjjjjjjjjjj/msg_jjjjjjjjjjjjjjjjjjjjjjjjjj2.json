@@ -1,0 +1,19 @@
+{
+  "id": "msg_jjjjjjjjjjjjjjjjjjjjjjjjjj2",
+  "role": "assistant",
+  "parts": [
+    {
+      "type": "text",
+      "text": "done"
+    }
+  ],
+  "metadata": {
+    "sessionID": "ses_jjjjjjjjjjjjjjjjjjjjjjjjjjjj",
+    "time": {
+      "created": 1776226900000
+    },
+    "assistant": {
+      "cost": 0.1
+    }
+  }
+}

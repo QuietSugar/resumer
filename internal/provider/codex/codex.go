@@ -216,7 +216,6 @@ func (p *Provider) parseJSONL(path string) *session.Session {
 		LastPrompt:   lastPrompt,
 		Prompts:      prompts,
 		AsstCount:    eventCount, // codex doesn't split assistant count cleanly; use event count
-		Tokens:       nil,
 		ResumeArgv:   []string{"codex", "resume", sessionID},
 	}
 }

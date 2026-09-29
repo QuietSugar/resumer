@@ -6,7 +6,6 @@ package render
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"strings"
 
@@ -20,7 +19,10 @@ const ansiReset = "\x1b[0m"
 // import provider packages.
 var BadgeANSI = map[string]string{
 	"claude-code": "\x1b[32m", // green
+	"codebuddy":   "\x1b[36m", // cyan
 	"codex":       "\x1b[36m", // cyan
+	"kimi-code":   "\x1b[35m", // magenta
+	"opencode":    "\x1b[34m", // blue
 }
 
 const (
@@ -32,11 +34,18 @@ func noColor() bool {
 	return os.Getenv("NO_COLOR") != ""
 }
 
-// Badge renders a fixed-width badge like "[cc]   " or "[codex]", 7 visible cols.
+// Badge renders a fixed-width badge like "[cc]   ", "[codex]", "[kimi] " or "[oc]   ", 7 visible cols.
 func Badge(source, ansi string) string {
 	text := "[" + source + "]"
-	if source == "claude-code" {
+	switch source {
+	case "claude-code":
 		text = "[cc]"
+	case "codebuddy":
+		text = "[cb]"
+	case "kimi-code":
+		text = "[kimi]"
+	case "opencode":
+		text = "[oc]"
 	}
 	padded := textutil.PadDisplay(text, 7)
 	if noColor() {
@@ -57,8 +66,8 @@ func Index(sessions []session.Session) string {
 	}
 	var out []string
 	out = append(out, fmt.Sprintf(
-		"%-17s %-7s %-25s %-3s %9s  %s",
-		"last_activity", "src", "project", "mk", "tokens", "first prompt"))
+		"%-17s %-7s %-25s %-3s  %s",
+		"last_activity", "src", "project", "mk", "first prompt"))
 	out = append(out, strings.Repeat("─", 140))
 	for i := range sessions {
 		s := &sessions[i]
@@ -67,11 +76,6 @@ func Index(sessions []session.Session) string {
 		proj := textutil.PadDisplay(textutil.TrimDisplay(s.ProjectLabel, 25), 25)
 		msgs := s.AsstCount + len(s.Prompts)
 		markers := textutil.VolumeMarker(msgs) + "  "
-		var tokTotal int64
-		if s.Tokens != nil {
-			tokTotal = s.Tokens.Input
-		}
-		tokCol := fmt.Sprintf("%9s", textutil.FmtTokens(tokTotal))
 		first := textutil.TrimDisplay(s.FirstPrompt, FirstPromptWidth)
 		firstPadded := textutil.PadDisplay(first, FirstPromptWidth)
 		aux := ""
@@ -84,7 +88,7 @@ func Index(sessions []session.Session) string {
 		if aux != "" {
 			label = firstPadded + "  " + aux
 		}
-		out = append(out, fmt.Sprintf("%s %s %s %s %s  %s", last, badge, proj, markers, tokCol, label))
+		out = append(out, fmt.Sprintf("%s %s %s %s  %s", last, badge, proj, markers, label))
 	}
 	return strings.Join(out, "\n")
 }
@@ -108,32 +112,18 @@ func FullBox(s *session.Session) string {
 	add("│ last activity:  %s", textutil.FmtTS(s.LastTS, true))
 	add("│ duration:       %s", textutil.FmtDuration(s.FirstTS, s.LastTS))
 	add("│ cwd:            %s", cwd)
-	add("│ prompts:        %d user / %d assistant", len(s.Prompts), s.AsstCount)
+	add("│ activity:       %d user prompts / ~%d assistant activity", len(s.Prompts), s.AsstCount)
 	if s.Title != "" {
 		add("│ title:          %s", s.Title)
 	}
 	if s.Subtitle != "" {
 		add("│ context:        %s", s.Subtitle)
 	}
-	if s.Tokens != nil && s.Tokens.Turns > 0 {
-		totalIn := s.Tokens.Input
-		cacheHit := int64(0)
-		if totalIn > 0 {
-			cacheHit = int64(math.Round(float64(s.Tokens.CacheRead) / float64(totalIn) * 100))
-		}
-		avgIn := int64(0)
-		if s.Tokens.Turns > 0 {
-			avgIn = totalIn / s.Tokens.Turns
-		}
-		add("│ ── tokens ──")
-		add("│ input:          %10s    (cache hit %d%%)", groupedInt(totalIn), cacheHit)
-		add("│ output:         %10s", groupedInt(s.Tokens.Output))
-		add("│ cache:          %s read / %s created",
-			textutil.FmtTokens(s.Tokens.CacheRead), textutil.FmtTokens(s.Tokens.CacheCreate))
-		add("│ avg input/turn: %10s", groupedInt(avgIn))
-	}
 	lines = append(lines, "├"+bar)
 	lines = append(lines, "│ opening prompts")
+	if len(s.Prompts) == 0 && s.FirstPrompt != "" {
+		add("│  %s", textutil.Trim(s.FirstPrompt, 350))
+	}
 	openEnd := len(s.Prompts)
 	if openEnd > 3 {
 		openEnd = 3
@@ -154,19 +144,4 @@ func FullBox(s *session.Session) string {
 	}
 	lines = append(lines, "└"+bar)
 	return strings.Join(lines, "\n")
-}
-
-// groupedInt formats with thousands separators (Python's {:,}).
-func groupedInt(n int64) string {
-	s := fmt.Sprintf("%d", n)
-	if n < 0 {
-		return s
-	}
-	var parts []string
-	for len(s) > 3 {
-		parts = append([]string{s[len(s)-3:]}, parts...)
-		s = s[:len(s)-3]
-	}
-	parts = append([]string{s}, parts...)
-	return strings.Join(parts, ",")
 }

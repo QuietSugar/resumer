@@ -21,7 +21,7 @@ import (
 	"github.com/jin-ttao/resumer/internal/session"
 )
 
-const helpLine = "↑↓ browse · / filter · tab source · ctrl-s sort · enter resume · esc cancel"
+const helpLine = "↑↓ browse · / filter · tab source · ctrl-s sort · ctrl-r rescan · enter resume · esc cancel"
 
 var (
 	headerStyle  = lipgloss.NewStyle().Bold(true)
@@ -30,12 +30,17 @@ var (
 	previewStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder(), true, false, false, false).
 			BorderForeground(lipgloss.Color("8"))
+	tipsStyle = lipgloss.NewStyle().
+			PaddingLeft(1).
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(lipgloss.Color("8"))
 )
 
 type loadedMsg struct {
-	name     string
-	sessions []session.Session
-	err      error
+	generation int
+	name       string
+	sessions   []session.Session
+	err        error
 }
 
 // Model is the picker's bubbletea model. Exported for teatest.
@@ -47,17 +52,21 @@ type Model struct {
 	preview viewport.Model
 	spin    spinner.Model
 
-	all       []session.Session
-	sources   []string // "" = all, else provider name
-	sourceIdx int
-	sortAsc   bool
-	pending   int
-	warnings  []string
+	all        []session.Session
+	sources    []string // "" = all, else provider name
+	sourceIdx  int
+	sortAsc    bool
+	pending    int
+	generation int
+	loaded     bool
+	warnings   []string
 
 	selected   *session.Session
 	noSessions bool
 	width      int
 	height     int
+	tipsWidth  int
+	customTips string
 	ready      bool
 }
 
@@ -80,13 +89,14 @@ func NewModel(providers []provider.Provider, filters session.Filters) Model {
 	}
 
 	return Model{
-		filters:   filters,
-		providers: providers,
-		list:      l,
-		preview:   viewport.New(0, 0),
-		spin:      sp,
-		sources:   sources,
-		pending:   len(providers),
+		filters:    filters,
+		providers:  providers,
+		list:       l,
+		preview:    viewport.New(0, 0),
+		spin:       sp,
+		sources:    sources,
+		pending:    len(providers),
+		customTips: loadCustomTips(),
 	}
 }
 
@@ -96,16 +106,21 @@ func (m Model) Selected() *session.Session { return m.selected }
 // NoSessions reports whether loading finished with zero sessions.
 func (m Model) NoSessions() bool { return m.noSessions }
 
-func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spin.Tick}
+func (m Model) scanCmds() []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.providers))
 	for _, p := range m.providers {
 		p := p
-		f := m.filters
+		f, generation := m.filters, m.generation
 		cmds = append(cmds, func() tea.Msg {
 			ss, err := p.ListSessions(f)
-			return loadedMsg{name: p.Name(), sessions: ss, err: err}
+			return loadedMsg{generation: generation, name: p.Name(), sessions: ss, err: err}
 		})
 	}
+	return cmds
+}
+
+func (m Model) Init() tea.Cmd {
+	cmds := append([]tea.Cmd{m.spin.Tick}, m.scanCmds()...)
 	return tea.Batch(cmds...)
 }
 
@@ -122,13 +137,26 @@ func (m *Model) currentSessions() []session.Session {
 }
 
 func (m *Model) applyItems() {
+	selectedID, selectedSource := "", ""
+	if selected, ok := m.list.SelectedItem().(sessionItem); ok {
+		selectedID, selectedSource = selected.s.SessionID, selected.s.Source
+	}
+
 	sessions := m.currentSessions()
 	items := make([]list.Item, len(sessions))
 	for i, s := range sessions {
 		items[i] = sessionItem{s: s}
 	}
 	m.list.SetItems(items)
-	if m.list.Index() >= len(items) {
+	selected := false
+	for i, s := range sessions {
+		if s.SessionID == selectedID && s.Source == selectedSource {
+			m.list.Select(i)
+			selected = true
+			break
+		}
+	}
+	if !selected && len(items) > 0 {
 		m.list.Select(0)
 	}
 	m.refreshPreview()
@@ -166,7 +194,15 @@ func (m *Model) resize() {
 		previewH = 3
 	}
 	m.list.SetSize(m.width, listH)
-	m.preview.Width = m.width
+	m.tipsWidth = 0
+	previewW := m.width
+	// Keep the fixed-width detail box intact; use the otherwise empty right
+	// side for tips only when the terminal can fit both panes comfortably.
+	if m.width >= 112 {
+		m.tipsWidth = 36
+		previewW = m.width - m.tipsWidth - 2
+	}
+	m.preview.Width = previewW
 	m.preview.Height = previewH
 	m.ready = true
 }
@@ -179,19 +215,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case loadedMsg:
-		m.pending--
+		if msg.generation != m.generation {
+			return m, nil
+		}
+		if m.pending > 0 {
+			m.pending--
+		}
 		if msg.err != nil {
 			m.warnings = append(m.warnings,
 				fmt.Sprintf("warning: %s provider failed: %v", msg.name, msg.err))
 			m.resize()
-		}
-		if len(msg.sessions) > 0 {
-			m.all = append(m.all, msg.sessions...)
+		} else {
+			kept := m.all[:0]
+			for _, existing := range m.all {
+				if existing.Source != msg.name {
+					kept = append(kept, existing)
+				}
+			}
+			m.all = append(kept, msg.sessions...)
 			m.applyItems()
 		}
-		if m.pending == 0 && len(m.all) == 0 {
-			m.noSessions = true
-			return m, tea.Quit
+		if m.pending == 0 {
+			firstLoad := !m.loaded
+			m.loaded = true
+			if firstLoad && len(m.all) == 0 {
+				m.noSessions = true
+				return m, tea.Quit
+			}
 		}
 		return m, nil
 
@@ -204,6 +254,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+r" {
+			m.generation++
+			m.pending = len(m.providers)
+			m.warnings = nil
+			m.resize()
+			cmds := append([]tea.Cmd{m.spin.Tick}, m.scanCmds()...)
+			return m, tea.Batch(cmds...)
+		}
 		// While the user is typing a filter, the list owns the keyboard.
 		if m.list.FilterState() == list.Filtering {
 			break
@@ -245,6 +303,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func tipsForSource(source string) string {
+	lines := []string{
+		"Session tips",
+		"resumer only browses and resumes.",
+		"",
+	}
+	switch source {
+	case "opencode":
+		lines = append(lines,
+			"OpenCode: delete with",
+			"opencode session delete",
+			"<sessionID>",
+		)
+	case "kimi-code":
+		lines = append(lines,
+			"Kimi Code: open its session",
+			"picker, select a session,",
+			"press Ctrl+X, then confirm.",
+		)
+	case "codebuddy":
+		lines = append(lines,
+			"CodeBuddy",
+			"Switch: /resume <session-id>",
+			"Picker: codebuddy --resume",
+			"Latest: codebuddy --continue",
+			"Rename: /rename <name>",
+			"New: /clear (history stays)",
+			"Delete one: Beta HTTP API",
+			"DELETE /api/v1/sessions/:id",
+			"Project purge is broader.",
+			"Preview purge: --dry-run.",
+		)
+	default:
+		lines = append(lines,
+			"Use this Agent's own CLI/TUI",
+			"session manager. The exact",
+			"steps differ by Agent/version.",
+		)
+	}
+	lines = append(lines,
+		"",
+		"Check the session ID first.",
+		"Deletion may be irreversible.",
+	)
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) View() string {
 	if !m.ready {
 		return "loading…"
@@ -266,7 +371,20 @@ func (m Model) View() string {
 		b.WriteString(warnStyle.Render(w) + "\n")
 	}
 	b.WriteString(m.list.View() + "\n")
-	b.WriteString(previewStyle.Width(m.width).Render(m.preview.View()))
+	preview := m.preview.View()
+	if m.tipsWidth > 0 {
+		source := ""
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			source = item.s.Source
+		}
+		tipText := m.customTips
+		if tipText == "" {
+			tipText = tipsForSource(source)
+		}
+		tips := tipsStyle.Width(m.tipsWidth - 1).Height(m.preview.Height).Render(tipText)
+		preview = lipgloss.JoinHorizontal(lipgloss.Top, preview, "  ", tips)
+	}
+	b.WriteString(previewStyle.Width(m.width).Render(preview))
 	return b.String()
 }
 

@@ -24,23 +24,56 @@ type Provider interface {
 
 var registry []Provider
 
+// disabled holds provider names turned off by the user (persisted in the
+// config file, applied via SetDisabled). A disabled provider is skipped by
+// every ambient path — Active() never yields it, so nothing walks or parses
+// its storage. Explicit per-invocation requests (--source NAME) bypass the
+// flag on purpose: the config supplies defaults, the command line overrides.
+var disabled = map[string]bool{}
+
+// SetDisabled replaces the disabled set from the config file. Unknown names
+// are kept: the config outlives registry changes.
+func SetDisabled(names []string) {
+	disabled = make(map[string]bool, len(names))
+	for _, n := range names {
+		disabled[n] = true
+	}
+}
+
+// IsEnabled reports whether name is not in the disabled set.
+func IsEnabled(name string) bool { return !disabled[name] }
+
+// DisabledNames returns the disabled provider names, sorted.
+func DisabledNames() []string {
+	out := make([]string, 0, len(disabled))
+	for n := range disabled {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Register appends a provider. Called from cli wiring to avoid import cycles
 // and keep this package dependency-free for tests.
 func Register(p Provider) {
 	registry = append(registry, p)
 }
 
-// All returns every registered provider.
+// All returns every registered provider, disabled or not.
 func All() []Provider {
 	out := make([]Provider, len(registry))
 	copy(out, registry)
 	return out
 }
 
-// Active returns providers whose data sources are present on this machine.
+// Active returns providers whose data sources are present on this machine
+// and not disabled by the user.
 func Active() []Provider {
 	var out []Provider
 	for _, p := range registry {
+		if !IsEnabled(p.Name()) {
+			continue
+		}
 		if p.IsAvailable() {
 			out = append(out, p)
 		}

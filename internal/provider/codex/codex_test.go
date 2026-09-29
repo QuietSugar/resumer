@@ -64,9 +64,6 @@ func TestFixtureParsing(t *testing.T) {
 	if one.FirstTS != "2026-04-15T05:00:00.000Z" {
 		t.Errorf("first ts (from session_meta payload) = %q", one.FirstTS)
 	}
-	if one.Tokens != nil {
-		t.Error("codex sessions carry no token usage")
-	}
 	if len(one.ResumeArgv) != 3 || one.ResumeArgv[0] != "codex" || one.ResumeArgv[1] != "resume" {
 		t.Errorf("resume argv = %v", one.ResumeArgv)
 	}

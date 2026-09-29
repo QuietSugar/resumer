@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,19 +13,21 @@ import (
 	"github.com/jin-ttao/resumer/internal/textutil"
 )
 
-// Column widths mirror the old fzf row so muscle memory carries over.
+// Compact fixed-width columns keep the session list readable in narrow terminals.
 const (
-	colLast    = 15
+	colLast    = 7
 	colBadge   = 7
-	colProject = 22
-	colPrompt  = 78
-	colAux     = 40
+	colProject = 16
+	colTitle   = 24
 )
 
 var (
 	badgeStyle = map[string]lipgloss.Style{
 		"claude-code": lipgloss.NewStyle().Foreground(lipgloss.Color("2")), // green
+		"codebuddy":   lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
 		"codex":       lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
+		"kimi-code":   lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
+		"opencode":    lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // blue
 	}
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
@@ -50,6 +53,27 @@ func (d rowDelegate) Height() int                             { return 1 }
 func (d rowDelegate) Spacing() int                            { return 0 }
 func (d rowDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
+func formatLastActivity(ts string, now time.Time) string {
+	last, ok := textutil.ParseISO(ts)
+	if !ok {
+		return "?"
+	}
+	age := now.Sub(last)
+	if age < time.Minute {
+		return "now"
+	}
+	minutes := int(age / time.Minute)
+	if minutes < 60 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	hours := minutes / 60
+	if hours < 24 {
+		return fmt.Sprintf("%dh%dm", hours, minutes%60)
+	}
+	days := hours / 24
+	return fmt.Sprintf("%dd%dh", days, hours%24)
+}
+
 func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	it, ok := item.(sessionItem)
 	if !ok {
@@ -57,26 +81,24 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	}
 	s := &it.s
 
-	last := textutil.PadDisplay(textutil.FmtTS(s.LastTS, false), colLast)
+	last := textutil.PadDisplay(formatLastActivity(s.LastTS, time.Now()), colLast)
 	badgeText := "[" + s.Source + "]"
 	if s.Source == "claude-code" {
 		badgeText = "[cc]"
 	}
+	if s.Source == "codebuddy" {
+		badgeText = "[cb]"
+	}
+	if s.Source == "kimi-code" {
+		badgeText = "[kimi]"
+	}
+	if s.Source == "opencode" {
+		badgeText = "[oc]"
+	}
 	badge := badgeStyle[s.Source].Render(textutil.PadDisplay(badgeText, colBadge))
 	proj := textutil.PadDisplay(textutil.TrimDisplay(s.ProjectLabel, colProject), colProject)
+	title := textutil.PadDisplay(textutil.TrimDisplay(s.Title, colTitle), colTitle)
 	marker := textutil.PadDisplay(textutil.VolumeMarker(s.AsstCount+len(s.Prompts)), 2)
-	var tokTotal int64
-	if s.Tokens != nil {
-		tokTotal = s.Tokens.Input
-	}
-	tok := fmt.Sprintf("%9s", textutil.FmtTokens(tokTotal))
-	first := textutil.PadDisplay(textutil.TrimDisplay(s.FirstPrompt, colPrompt), colPrompt)
-	aux := ""
-	if s.Title != "" {
-		aux = textutil.TrimDisplay(s.Title, colAux)
-	} else if s.Subtitle != "" {
-		aux = textutil.TrimDisplay(s.Subtitle, colAux)
-	}
 
 	selected := index == m.Index()
 	cursor := "  "
@@ -86,12 +108,8 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 		rowStyle = selectedStyle
 	}
 
-	label := rowStyle.Render(first)
-	if aux != "" {
-		label += "  " + dimStyle.Render(aux)
-	}
-	row := fmt.Sprintf("%s%s %s %s %s %s  %s",
-		cursor, dimStyle.Render(last), badge, rowStyle.Render(proj), marker, dimStyle.Render(tok), label)
+	row := fmt.Sprintf("%s%s %s %s %s %s",
+		cursor, dimStyle.Render(last), badge, rowStyle.Render(proj), dimStyle.Render(title), marker)
 
 	// Clip to the list's width so long rows never wrap and break the layout.
 	fmt.Fprint(w, lipgloss.NewStyle().MaxWidth(m.Width()).Render(row))

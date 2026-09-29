@@ -30,9 +30,9 @@ cc_session() { # dir uuid cwd ts_start ts_end first_prompt second_prompt title_t
   {
     printf '{"type":"system","subtype":"init","cwd":"%s","timestamp":"%s"}\n' "$cwd" "$t0"
     printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"%s"}}\n' "$t0" "$p1"
-    printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"on it"}],"usage":{"input_tokens":48200,"output_tokens":2100,"cache_read_input_tokens":41000,"cache_creation_input_tokens":1200}}}\n' "$t0"
+    printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"on it"}]}}\n' "$t0"
     printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"%s"}}\n' "$t1" "$p2"
-    printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":52400,"output_tokens":1800,"cache_read_input_tokens":49000,"cache_creation_input_tokens":900}}}\n' "$t1"
+    printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}\n' "$t1"
     if [[ -n "$ttype" ]]; then
       printf '{"type":"%s","timestamp":"%s","%s":"%s"}\n' "$ttype" "$t1" \
         "$([[ "$ttype" == custom-title ]] && echo customTitle || echo aiTitle)" "$title"

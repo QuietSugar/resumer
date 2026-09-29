@@ -8,12 +8,20 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
+	"strings"
 
+	"github.com/charmbracelet/x/term"
+
+	"github.com/jin-ttao/resumer/internal/config"
 	"github.com/jin-ttao/resumer/internal/execres"
 	"github.com/jin-ttao/resumer/internal/provider"
 	"github.com/jin-ttao/resumer/internal/provider/claudecode"
+	"github.com/jin-ttao/resumer/internal/provider/codebuddy"
 	"github.com/jin-ttao/resumer/internal/provider/codex"
+	"github.com/jin-ttao/resumer/internal/provider/kimi"
+	"github.com/jin-ttao/resumer/internal/provider/opencode"
 	"github.com/jin-ttao/resumer/internal/render"
 	"github.com/jin-ttao/resumer/internal/session"
 	"github.com/jin-ttao/resumer/internal/tui"
@@ -22,19 +30,26 @@ import (
 func registerProviders() {
 	if len(provider.All()) == 0 {
 		provider.Register(claudecode.New())
+		provider.Register(codebuddy.New())
 		provider.Register(codex.New())
+		provider.Register(kimi.New())
+		provider.Register(opencode.New())
 	}
 }
 
 const usageText = `usage: resumer [list] [options]
+       resumer provider [list | on NAME | off NAME]
 
 Unified AI CLI session resumer.
 
   resumer              interactive picker across all active providers
   resumer list         render merged session list (no interaction)
+  resumer provider     interactive on/off checkboxes (space toggle, enter
+                       saves); a disabled provider is not scanned or parsed
+                       at all until turned back on
 
 options:
-  --source NAME    limit to a single provider (claude-code | codex)
+  --source NAME    limit to a single provider (claude-code | codebuddy | codex | kimi-code | opencode)
   --days N         only show sessions active in the last N days (default: 7)
   --date DATE      YYYY-MM-DD — only sessions active on this date
   --all            no time filter
@@ -43,6 +58,11 @@ options:
   --json           list mode only: emit JSON array of sessions
   --full [N]       list mode only: render detailed boxes for top N (default 5)
   --version        print version
+
+Disabled providers are recorded in ~/.config/resumer/config.json (override
+with $RESUMER_CONFIG) and are skipped by ambient scans. An explicit
+--source NAME still works on a disabled provider: the flag is a deliberate
+per-invocation request.
 `
 
 // valueFlags take a separate argument (so "list" after them is a value, not
@@ -52,8 +72,8 @@ var valueFlags = map[string]bool{
 	"--project": true, "--limit": true,
 }
 
-// normalize extracts the optional "list" subcommand and rewrites the
-// argparse-style "--full [N]" into flag-friendly "--full=N".
+// normalize extracts the optional subcommand ("list" or "provider") and
+// rewrites the argparse-style "--full [N]" into flag-friendly "--full=N".
 func normalize(argv []string) (command string, out []string) {
 	expectValue := false
 	for i := 0; i < len(argv); i++ {
@@ -62,8 +82,8 @@ func normalize(argv []string) (command string, out []string) {
 		case expectValue:
 			expectValue = false
 			out = append(out, tok)
-		case tok == "list" && command == "":
-			command = "list"
+		case command == "" && (tok == "list" || tok == "provider"):
+			command = tok
 		case tok == "--full":
 			n := 5
 			if i+1 < len(argv) {
@@ -89,6 +109,21 @@ func Run(argv []string, version string) int {
 
 	command, args := normalize(argv)
 
+	// The provider subcommand has its own mini-parsing (positional args, no
+	// flags) and its own config-error policy: mutating commands must not
+	// silently proceed on an unreadable config, or Save would clobber it.
+	if command == "provider" {
+		return runProviderCmd(args)
+	}
+
+	// Every other path only reads the config: degrade to defaults with a
+	// warning instead of failing the whole invocation.
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: ignoring unreadable config: %v\n", err)
+	}
+	provider.SetDisabled(cfg.Disabled)
+
 	fs := flag.NewFlagSet("resumer", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usageText) }
 	var (
@@ -113,9 +148,10 @@ func Run(argv []string, version string) int {
 		fmt.Printf("resumer %s\n", version)
 		return 0
 	}
-	if *source != "" && *source != "claude-code" && *source != "codex" {
+	validSources := map[string]bool{"claude-code": true, "codebuddy": true, "codex": true, "kimi-code": true, "opencode": true}
+	if *source != "" && !validSources[*source] {
 		fmt.Fprintf(os.Stderr,
-			"error: argument --source: invalid choice: %q (choose from claude-code, codex)\n", *source)
+			"error: argument --source: invalid choice: %q (choose from claude-code, codebuddy, codex, kimi-code, opencode)\n", *source)
 		return 2
 	}
 
@@ -133,11 +169,18 @@ func Run(argv []string, version string) int {
 
 	// Global availability check only when no specific source requested;
 	// otherwise MergedList returns a source-specific error with better
-	// diagnostics.
+	// diagnostics. A disabled provider counts as "handled": point the user
+	// at `provider on` rather than claiming nothing is installed.
 	if *source == "" && len(provider.AvailableSourceNames()) == 0 {
-		fmt.Fprintln(os.Stderr,
-			"error: no session providers available. "+
-				"Install claude-code or codex and ensure their session directories exist.")
+		msg := "error: no session providers available. " +
+			"Install Claude Code, CodeBuddy, Codex, Kimi, or OpenCode and ensure their session storage exists."
+		if dis := provider.DisabledNames(); len(dis) > 0 {
+			msg = fmt.Sprintf(
+				"error: no enabled session providers available (disabled: %s). "+
+					"Run `resumer provider on <name>` to re-enable one.",
+				strings.Join(dis, ", "))
+		}
+		fmt.Fprintln(os.Stderr, msg)
 		return 2
 	}
 
@@ -192,16 +235,181 @@ func runPicker(filters session.Filters) int {
 	return execResume(chosen)
 }
 
+// runProviderCmd implements `resumer provider [list | on NAME | off NAME]`.
+// State is persisted to the config file; unknown subcommands exit 2.
+func runProviderCmd(args []string) int {
+	sub := "" // bare `resumer provider` — the interactive toggle screen
+	if len(args) > 0 {
+		sub = args[0]
+		args = args[1:]
+	}
+
+	switch sub {
+	case "":
+		// Bare `resumer provider` — interactive checkbox screen on a TTY,
+		// the plain table otherwise.
+		return runProviderToggleUI()
+
+	case "list":
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 2
+		}
+		return printProviderList(cfg)
+
+	case "on", "off":
+		if len(args) == 0 {
+			fmt.Fprintf(os.Stderr, "error: provider %s requires a name (choose from %s)\n",
+				sub, strings.Join(providerNames(), ", "))
+			return 2
+		}
+		name := args[0]
+		if provider.Get(name) == nil {
+			fmt.Fprintf(os.Stderr, "error: unknown provider: %q (choose from %s)\n",
+				name, strings.Join(providerNames(), ", "))
+			return 2
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: refusing to rewrite unreadable config: %v\n", err)
+			return 2
+		}
+		if sub == "off" {
+			cfg.Disable(name)
+			if err := config.Save(cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "error: saving config: %v\n", err)
+				return 2
+			}
+			fmt.Printf("%s disabled — resumer will no longer scan or parse it.\n", name)
+		} else {
+			cfg.Enable(name)
+			if err := config.Save(cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "error: saving config: %v\n", err)
+				return 2
+			}
+			fmt.Printf("%s enabled.\n", name)
+		}
+		return 0
+
+	default:
+		fmt.Fprintf(os.Stderr,
+			"error: unknown provider subcommand: %q (choose from list, on, off)\n", sub)
+		return 2
+	}
+}
+
+// printProviderList writes the plain text state table (also the fallback for
+// `resumer provider` when stdin is not a TTY).
+func printProviderList(cfg config.Config) int {
+	fmt.Printf("%-12s %-5s %-10s %s\n", "PROVIDER", "STATE", "STORAGE", "CONFIG")
+	for _, p := range provider.All() {
+		state, storage := "on", "ok"
+		cfgNote := "-"
+		if !p.IsAvailable() {
+			storage = "missing"
+		}
+		if cfg.IsDisabled(p.Name()) {
+			state = "off"
+			cfgNote = "disabled"
+		}
+		fmt.Printf("%-12s %-5s %-10s %s\n", p.Name(), state, storage, cfgNote)
+	}
+	return 0
+}
+
+// runProviderToggleUI opens the interactive checkbox screen for bare
+// `resumer provider`. On save it persists the resulting disabled list; esc
+// leaves the config untouched. Scripted (non-TTY) stdin falls back to the
+// text table instead of hanging on a UI it cannot answer.
+func runProviderToggleUI() int {
+	// Mutating path: never proceed on an unreadable config — Save would
+	// clobber it.
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: refusing to rewrite unreadable config: %v\n", err)
+		return 2
+	}
+	if !stdinIsTerminal() {
+		return printProviderList(cfg)
+	}
+
+	disabled := map[string]bool{}
+	for _, d := range cfg.Disabled {
+		disabled[d] = true
+	}
+	var names []string
+	storage := map[string]bool{}
+	for _, p := range provider.All() {
+		names = append(names, p.Name())
+		storage[p.Name()] = p.IsAvailable()
+	}
+
+	result, canceled, err := tui.ProviderToggle(names, disabled, storage)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	if canceled {
+		fmt.Println("cancelled — config unchanged.")
+		return 0
+	}
+	sameSet := len(cfg.Disabled) == len(result)
+	if sameSet {
+		want := map[string]bool{}
+		for _, d := range cfg.Disabled {
+			want[d] = true
+		}
+		for _, r := range result {
+			if !want[r] {
+				sameSet = false
+				break
+			}
+		}
+	}
+	if sameSet {
+		fmt.Println("no changes.")
+		return 0
+	}
+	cfg.Disabled = result
+	sort.Strings(cfg.Disabled)
+	if err := config.Save(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "error: saving config: %v\n", err)
+		return 2
+	}
+	if len(result) == 0 {
+		fmt.Println("all providers enabled.")
+	} else {
+		fmt.Printf("disabled: %s\n", strings.Join(result, ", "))
+	}
+	return 0
+}
+
+// stdinIsTerminal reports whether stdin is an interactive terminal. Uses the
+// charmbracelet/x/term package already in the dependency graph (bubbletea's
+// own terminal layer) — no new module.
+func stdinIsTerminal() bool {
+	return term.IsTerminal(os.Stdin.Fd())
+}
+
+// providerNames lists registered provider names in registry order.
+func providerNames() []string {
+	var out []string
+	for _, p := range provider.All() {
+		out = append(out, p.Name())
+	}
+	return out
+}
+
 // execResume chdirs into the session's directory and replaces the process
 // with the provider's resume command.
 //
-// For claude-code, prefer a cwd derived from the session file's encoded
-// parent dir. Stored cwd in the JSONL can be stale/mismatched (seen with
-// iCloud/Obsidian paths), causing `claude --resume` to fail because it
-// derives the project dir from the current cwd.
+// For Claude Code and its CodeBuddy fork, prefer a cwd derived from the
+// session file's encoded parent directory. A stale stored cwd can make either
+// CLI fail to locate the project-local session.
 func execResume(s *session.Session) int {
 	targetCwd := ""
-	if s.Source == "claude-code" {
+	if s.Source == "claude-code" || s.Source == "codebuddy" {
 		targetCwd = claudecode.ResolveExecCwd(s.Path, s.Cwd)
 	}
 	if targetCwd == "" {
@@ -230,8 +438,11 @@ func execResume(s *session.Session) int {
 	if err != nil {
 		binName := s.ResumeArgv[0]
 		installHint := map[string]string{
-			"claude": "https://docs.anthropic.com/en/docs/claude-code/quickstart",
-			"codex":  "https://github.com/openai/codex",
+			"claude":    "https://docs.anthropic.com/en/docs/claude-code/quickstart",
+			"codebuddy": "https://www.codebuddy.ai/docs/cli/reference",
+			"codex":     "https://github.com/openai/codex",
+			"kimi":      "https://github.com/MoonshotAI/kimi-code",
+			"opencode":  "https://opencode.ai/docs",
 		}[binName]
 		fmt.Fprintf(os.Stderr, "error: '%s' not found in PATH\n", binName)
 		if installHint != "" {
