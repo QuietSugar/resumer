@@ -13,3 +13,20 @@ func TestFullBoxShowsFirstPromptWhenPromptListIsEmpty(t *testing.T) {
 		t.Fatalf("detail box is missing first prompt:\n%s", box)
 	}
 }
+
+func TestRenderersOmitTokenAndCacheStatistics(t *testing.T) {
+	sessions := []session.Session{{
+		Source: "claude-code", SessionID: "fixture-session", ProjectLabel: "fixture",
+	}}
+	outputs := []string{
+		Index(sessions),
+		FullBox(&sessions[0]),
+		JSON(sessions),
+	}
+	for _, output := range outputs {
+		lower := strings.ToLower(output)
+		if strings.Contains(lower, "token") || strings.Contains(lower, "cache hit") {
+			t.Errorf("render output still contains usage statistics:\n%s", output)
+		}
+	}
+}

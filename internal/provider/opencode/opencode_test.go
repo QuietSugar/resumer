@@ -87,16 +87,6 @@ func TestSQLiteParsing(t *testing.T) {
 	if one.LastTS != "2026-04-15T05:05:00Z" {
 		t.Errorf("last ts = %q", one.LastTS)
 	}
-	if one.Tokens == nil {
-		t.Fatal("tokens missing")
-	}
-	if one.Tokens.Input != 1500 || one.Tokens.Output != 300 ||
-		one.Tokens.CacheRead != 9000 || one.Tokens.CacheCreate != 1200 {
-		t.Errorf("tokens = %+v", one.Tokens)
-	}
-	if one.Tokens.Turns != 2 {
-		t.Errorf("token turns = %d, want 2", one.Tokens.Turns)
-	}
 	if len(one.ResumeArgv) != 3 || one.ResumeArgv[0] != "opencode" ||
 		one.ResumeArgv[1] != "--session" || one.ResumeArgv[2] != one.SessionID {
 		t.Errorf("resume argv = %v", one.ResumeArgv)
@@ -170,10 +160,6 @@ func TestJSONFallbackSession(t *testing.T) {
 	}
 	if js.AsstCount != 1 {
 		t.Errorf("asst count = %d", js.AsstCount)
-	}
-	if js.Tokens == nil || js.Tokens.Input != 100 || js.Tokens.Output != 40 ||
-		js.Tokens.CacheRead != 50 || js.Tokens.CacheCreate != 10 || js.Tokens.Turns != 1 {
-		t.Errorf("tokens = %+v", js.Tokens)
 	}
 	if js.FirstTS != "2026-04-15T04:20:00Z" || js.LastTS != "2026-04-15T04:25:00Z" {
 		t.Errorf("timestamps = %q .. %q", js.FirstTS, js.LastTS)

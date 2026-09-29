@@ -1,4 +1,4 @@
 {"type":"system","subtype":"init","cwd":"/tmp/resumer-fixtures/beta","gitBranch":"main","timestamp":"2026-04-15T04:00:00.000Z"}
 {"type":"system","subtype":"local_command","timestamp":"2026-04-15T04:00:01.000Z","content":"<local-command-stdout>Branched conversation. You are now in the branch. To resume the original: claude -r aaaaaaaa-0002-4000-8000-000000000002</local-command-stdout>"}
 {"type":"user","timestamp":"2026-04-15T04:00:15.000Z","message":{"role":"user","content":"forked session continues here"}}
-{"type":"assistant","timestamp":"2026-04-15T04:00:25.000Z","message":{"role":"assistant","content":[{"type":"text","text":"acknowledged"}],"usage":{"input_tokens":180,"output_tokens":40,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"assistant","timestamp":"2026-04-15T04:00:25.000Z","message":{"role":"assistant","content":[{"type":"text","text":"acknowledged"}]}}

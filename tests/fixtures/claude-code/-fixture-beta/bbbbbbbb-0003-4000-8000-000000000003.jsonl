@@ -1,4 +1,4 @@
 {"type":"system","subtype":"init","cwd":"/tmp/resumer-fixtures/beta","gitBranch":"feature/x","timestamp":"2026-04-15T03:00:00.000Z"}
 {"type":"user","timestamp":"2026-04-15T03:00:10.000Z","message":{"role":"user","content":[{"type":"text","text":"ai-titled fixture prompt"}]}}
-{"type":"assistant","timestamp":"2026-04-15T03:00:20.000Z","message":{"role":"assistant","content":[{"type":"text","text":"reply"}],"usage":{"input_tokens":150,"output_tokens":60,"cache_read_input_tokens":200,"cache_creation_input_tokens":80}}}
+{"type":"assistant","timestamp":"2026-04-15T03:00:20.000Z","message":{"role":"assistant","content":[{"type":"text","text":"reply"}]}}
 {"type":"ai-title","timestamp":"2026-04-15T03:01:00.000Z","aiTitle":"Auto Generated Title"}

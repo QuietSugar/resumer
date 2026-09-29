@@ -56,13 +56,6 @@ func TestFixtureParsing(t *testing.T) {
 	if plain.AsstCount != 2 || len(plain.Prompts) != 2 {
 		t.Errorf("plain counts: asst=%d prompts=%d", plain.AsstCount, len(plain.Prompts))
 	}
-	if plain.Tokens == nil {
-		t.Fatal("plain tokens nil")
-	}
-	if plain.Tokens.Input != 220 || plain.Tokens.Output != 80 ||
-		plain.Tokens.CacheRead != 800 || plain.Tokens.CacheCreate != 100 || plain.Tokens.Turns != 2 {
-		t.Errorf("plain tokens = %+v", *plain.Tokens)
-	}
 	if plain.FirstTS != "2026-04-15T01:00:00.000Z" || plain.LastTS != "2026-04-15T01:05:07.000Z" {
 		t.Errorf("plain ts = %q .. %q", plain.FirstTS, plain.LastTS)
 	}

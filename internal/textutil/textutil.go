@@ -5,7 +5,6 @@ package textutil
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -27,39 +26,6 @@ func ParseISO(ts string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
-}
-
-func groupThousands(n int64) string {
-	s := strconv.FormatInt(n, 10)
-	neg := strings.HasPrefix(s, "-")
-	if neg {
-		s = s[1:]
-	}
-	var parts []string
-	for len(s) > 3 {
-		parts = append([]string{s[len(s)-3:]}, parts...)
-		s = s[:len(s)-3]
-	}
-	parts = append([]string{s}, parts...)
-	out := strings.Join(parts, ",")
-	if neg {
-		out = "-" + out
-	}
-	return out
-}
-
-// FmtTokens: 285120→"285K", 10014000→"10,014K", 0→"—".
-func FmtTokens(n int64) string {
-	if n <= 0 {
-		return "—"
-	}
-	if n >= 10_000 {
-		return groupThousands(n/1000) + "K"
-	}
-	if n >= 1_000 {
-		return fmt.Sprintf("%.1fK", float64(n)/1000)
-	}
-	return strconv.FormatInt(n, 10)
 }
 
 // FmtTS renders "YYYY-MM-DD HH:MM:SS" (or without year when includeYear is

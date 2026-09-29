@@ -1,10 +1,19 @@
 {
   "id": "msg_jjjjjjjjjjjjjjjjjjjjjjjjjj2",
   "role": "assistant",
-  "parts": [ { "type": "text", "text": "done" } ],
+  "parts": [
+    {
+      "type": "text",
+      "text": "done"
+    }
+  ],
   "metadata": {
     "sessionID": "ses_jjjjjjjjjjjjjjjjjjjjjjjjjjjj",
-    "time": { "created": 1776226900000 },
-    "assistant": { "cost": 0.1, "tokens": { "input": 100, "output": 40, "reasoning": 0, "cache": { "read": 50, "write": 10 } } }
+    "time": {
+      "created": 1776226900000
+    },
+    "assistant": {
+      "cost": 0.1
+    }
   }
 }

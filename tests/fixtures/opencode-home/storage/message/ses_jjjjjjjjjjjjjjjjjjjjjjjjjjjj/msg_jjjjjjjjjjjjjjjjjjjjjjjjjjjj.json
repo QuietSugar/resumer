@@ -2,8 +2,19 @@
   "id": "msg_jjjjjjjjjjjjjjjjjjjjjjjjjjjj",
   "role": "user",
   "parts": [
-    { "type": "text", "text": "opencode json fixture first prompt" },
-    { "type": "reasoning", "text": "hmm" }
+    {
+      "type": "text",
+      "text": "opencode json fixture first prompt"
+    },
+    {
+      "type": "reasoning",
+      "text": "hmm"
+    }
   ],
-  "metadata": { "sessionID": "ses_jjjjjjjjjjjjjjjjjjjjjjjjjjjj", "time": { "created": 1776226805000 } }
+  "metadata": {
+    "sessionID": "ses_jjjjjjjjjjjjjjjjjjjjjjjjjjjj",
+    "time": {
+      "created": 1776226805000
+    }
+  }
 }

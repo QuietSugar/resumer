@@ -4,7 +4,7 @@
 //
 //   - v1.1+ / v2: SQLite at $XDG_DATA_HOME/opencode/opencode.db
 //     (stable channel; channel-suffixed opencode-<channel>.db otherwise).
-//     session table: id/title/directory/parent_id/cost/tokens_*/
+//     session table: id/title/directory/parent_id and timestamps.
 //     time_created/time_updated/time_archived (epoch milliseconds).
 //     Prompts: session_message rows ({type:"user",text}) in v2; legacy
 //     message+part table pairs in dbs migrated from 1.x.
@@ -316,17 +316,6 @@ func (p *Provider) readSQLite(path string) ([]session.Session, error) {
 		updated, _ := r.Int("time_updated")
 		pa := prompts[id]
 
-		usage := session.TokenUsage{}
-		usage.Input, _ = r.Int("tokens_input")
-		usage.Output, _ = r.Int("tokens_output")
-		usage.CacheRead, _ = r.Int("tokens_cache_read")
-		usage.CacheCreate, _ = r.Int("tokens_cache_write")
-		usage.Turns = int64(pa.asst)
-		var tokens *session.TokenUsage
-		if usage.Turns > 0 || usage.Input > 0 || usage.Output > 0 {
-			tokens = &usage
-		}
-
 		out = append(out, session.Session{
 			Source:       "opencode",
 			SessionID:    id,
@@ -339,7 +328,6 @@ func (p *Provider) readSQLite(path string) ([]session.Session, error) {
 			FirstPrompt:  pa.first,
 			LastPrompt:   pa.last,
 			AsstCount:    pa.asst,
-			Tokens:       tokens,
 			ResumeArgv:   []string{"opencode", "--session", id},
 		})
 		return nil
@@ -377,18 +365,6 @@ type jsonMessageFile struct {
 		Time struct {
 			Created int64 `json:"created"`
 		} `json:"time"`
-		Assistant *struct {
-			Cost   float64 `json:"cost"`
-			Tokens *struct {
-				Input     float64 `json:"input"`
-				Output    float64 `json:"output"`
-				Reasoning float64 `json:"reasoning"`
-				Cache     struct {
-					Read  float64 `json:"read"`
-					Write float64 `json:"write"`
-				} `json:"cache"`
-			} `json:"tokens"`
-		} `json:"assistant"`
 	} `json:"metadata"`
 }
 
@@ -415,7 +391,6 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 		}
 
 		pa := &promptAgg{}
-		var tok session.TokenUsage
 		msgDir := filepath.Join(dataRoot(), "storage", "message", info.ID)
 		if entries, merr := os.ReadDir(msgDir); merr == nil {
 			names := make([]string, 0, len(entries))
@@ -445,20 +420,8 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 					}
 				case "assistant":
 					pa.addAssistantTurn(msg.ParentID, ts)
-					if t := msg.Metadata.Assistant.Tokens; t != nil {
-						tok.Input += int64(t.Input)
-						tok.Output += int64(t.Output)
-						tok.CacheRead += int64(t.Cache.Read)
-						tok.CacheCreate += int64(t.Cache.Write)
-					}
 				}
 			}
-		}
-		tok.Turns = int64(pa.asst)
-
-		var tokens *session.TokenUsage
-		if tok.Turns > 0 || tok.Input > 0 || tok.Output > 0 {
-			tokens = &tok
 		}
 		out = append(out, session.Session{
 			Source:       "opencode",
@@ -473,7 +436,6 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 			LastPrompt:   pa.last,
 			Prompts:      nil,
 			AsstCount:    pa.asst,
-			Tokens:       tokens,
 			ResumeArgv:   []string{"opencode", "--session", info.ID},
 		})
 		return nil

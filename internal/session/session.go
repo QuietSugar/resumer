@@ -2,15 +2,6 @@
 // providers, renderers, the TUI, and the exec dispatcher.
 package session
 
-// TokenUsage aggregates assistant-turn usage across a session.
-type TokenUsage struct {
-	Input       int64 `json:"input"`
-	Output      int64 `json:"output"`
-	CacheRead   int64 `json:"cache_read"`
-	CacheCreate int64 `json:"cache_create"`
-	Turns       int64 `json:"turns"`
-}
-
 // Prompt is one user prompt with its timestamp (empty string when unknown).
 type Prompt struct {
 	TS   string
@@ -33,7 +24,6 @@ type Session struct {
 	LastPrompt   string
 	Prompts      []Prompt
 	AsstCount    int
-	Tokens       *TokenUsage // nil when no assistant turns carried usage
 	ResumeArgv   []string
 }
 

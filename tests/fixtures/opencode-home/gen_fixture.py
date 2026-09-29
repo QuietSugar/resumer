@@ -2,7 +2,7 @@
 """Regenerate tests/fixtures/opencode-home/opencode.db.
 
 Schema mirrors opencode 1.18.x (baseline 1.18.33): the `session` table drives
-metadata/tokens, conversations are dual-projected into `session_message`
+session metadata, conversations are dual-projected into `session_message`
 (durable pipeline) and the legacy `message`+`part` pair (v1-compat layer).
 The fixture exercises: dual-write dedupe, pre-upgrade sessions that exist only
 in the legacy pair, archived/child skipping, an oversized overflow-page blob,
@@ -77,10 +77,10 @@ CREATE TABLE part (
 """
 
 def session_row(sid, project, slug, directory, title, created, updated,
-                tokens=(0, 0, 0, 0, 0), parent=None, archived=None, diffs=None):
+                parent=None, archived=None, diffs=None):
     return (sid, project, None, parent, slug, directory, None, title, "1.18.33",
             None, None, None, None, diffs, None, 0.0,
-            tokens[0], tokens[1], 0, tokens[2], tokens[3],
+            0, 0, 0, 0, 0,
             None, None, None, None, created, updated, None, archived)
 
 def main(path):
@@ -93,8 +93,7 @@ def main(path):
     # same two turns — resumer must dedupe, not double-count).
     db.execute("INSERT INTO session VALUES (%s)" % ",".join("?" * 29),
                session_row(SES["aaaa"], "proj-oc", "one", "/tmp/resumer-fixtures/oc-one",
-                           "OpenCode Fixture One", T["aaaa_created"], T["aaaa_updated"],
-                           tokens=(1500, 300, 9000, 1200)))
+                           "OpenCode Fixture One", T["aaaa_created"], T["aaaa_updated"]))
     # ses_bbbb: archived → skipped. Carries a >4KiB summary_diffs blob so the
     # reader must follow an overflow page chain.
     big = json.dumps([{"file": "big%d.txt" % i, "additions": i} for i in range(400)])

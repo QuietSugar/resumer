@@ -75,9 +75,6 @@ func TestFixtureParsing(t *testing.T) {
 	if len(one.Prompts) > 0 && one.Prompts[0].TS != "2026-04-15T05:30:05Z" {
 		t.Errorf("prompt ts = %q", one.Prompts[0].TS)
 	}
-	if one.Tokens == nil || one.Tokens.Turns != 2 || one.Tokens.Input != 0 || one.Tokens.Output != 0 {
-		t.Errorf("legacy fixture token summary = %+v, want turns only", one.Tokens)
-	}
 	if len(one.ResumeArgv) != 3 || one.ResumeArgv[0] != "kimi" ||
 		one.ResumeArgv[1] != "--session" || one.ResumeArgv[2] != one.SessionID {
 		t.Errorf("resume argv = %v", one.ResumeArgv)
@@ -92,13 +89,6 @@ func TestKimiV2Events(t *testing.T) {
 	}
 	if got.AsstCount != 2 {
 		t.Errorf("assistant turns = %d, want 2 completed turn.ended events", got.AsstCount)
-	}
-	if got.Tokens == nil {
-		t.Fatal("usage.record events should produce token totals")
-	}
-	if got.Tokens.Input != 30 || got.Tokens.Output != 12 ||
-		got.Tokens.CacheRead != 7 || got.Tokens.CacheCreate != 3 || got.Tokens.Turns != 2 {
-		t.Errorf("token totals = %+v", got.Tokens)
 	}
 	if len(got.Prompts) != 2 || got.FirstPrompt != "kimi v2 first prompt" ||
 		got.LastPrompt != "kimi v2 second prompt" {

@@ -17,9 +17,9 @@
 // recorded workDir, which resumer passes via Session.Cwd).
 //
 // Kimi Code 2.1.x stores durable v2 events in wire.jsonl: user inputs appear
-// in turn.prompt/context.append_message, completed replies in turn.ended, and
-// token deltas in usage.record. Older role-based message events remain a
-// best-effort fallback. Content may be a string or typed {type,text} blocks.
+// in turn.prompt/context.append_message and completed replies in turn.ended.
+// Older role-based message events remain a best-effort fallback. Content may
+// be a string or typed {type,text} blocks.
 package kimi
 
 import (
@@ -160,7 +160,6 @@ type wireRecord struct {
 	Content   json.RawMessage `json:"content"`
 	Input     json.RawMessage `json:"input"`
 	Origin    json.RawMessage `json:"origin"`
-	Usage     json.RawMessage `json:"usage"`
 }
 
 // recordTS resolves a record's timestamp: epoch-ms `time` first (the real
@@ -443,15 +442,13 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 
 	// The 2.1.x main-agent wire stream stores submitted prompts in
 	// turn.prompt/context.append_message, completed replies in turn.ended,
-	// loop content in context.append_loop_event, and usage deltas in
-	// usage.record. Subagents are in separate files and are not scanned.
+	// and loop content in context.append_loop_event. Subagents are in separate
+	// files and are not scanned.
 	firstTS, lastTS := "", ""
 	legacyAssistantCount := 0
 	hasTurnEndedEvents, hasPromptCompletedEvents := false, false
 	turnEnds, promptEnds := map[string]bool{}, map[string]bool{}
 	var promptCandidates []promptCandidate
-	var usage session.TokenUsage
-	usageRecords := 0
 	if f, err := os.Open(filepath.Join(dir, "agents", "main", "wire.jsonl")); err == nil {
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 0, 64<<10), maxLineBytes)
@@ -484,20 +481,6 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 						key = recordTS(r)
 					}
 					promptEnds[key] = true
-				}
-			case "usage.record":
-				var recorded struct {
-					InputOther        int64 `json:"inputOther"`
-					Output            int64 `json:"output"`
-					InputCacheRead    int64 `json:"inputCacheRead"`
-					InputCacheCreated int64 `json:"inputCacheCreation"`
-				}
-				if len(r.Usage) > 0 && json.Unmarshal(r.Usage, &recorded) == nil {
-					usage.Input += recorded.InputOther
-					usage.Output += recorded.Output
-					usage.CacheRead += recorded.InputCacheRead
-					usage.CacheCreate += recorded.InputCacheCreated
-					usageRecords++
 				}
 			}
 
@@ -553,12 +536,6 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 	case hasPromptCompletedEvents:
 		asstCount = len(promptEnds)
 	}
-	usage.Turns = int64(asstCount)
-	var tokens *session.TokenUsage
-	if usageRecords > 0 || asstCount > 0 {
-		tokens = &usage
-	}
-
 	firstTS = earlierTS(firstTS, createdAt)
 	lastTS = laterTS(lastTS, updatedAt)
 
@@ -613,7 +590,6 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 		LastPrompt:   lastPrompt,
 		Prompts:      prompts,
 		AsstCount:    asstCount,
-		Tokens:       tokens,
 		ResumeArgv:   []string{"kimi", "--session", sessionID},
 	}
 }

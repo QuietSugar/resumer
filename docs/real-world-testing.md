@@ -44,17 +44,15 @@ with open(sys.argv[1], encoding="utf-8") as f:
     sessions = json.load(f)
 print(f"OpenCode sessions: {len(sessions)}")
 for s in sessions:
-    tokens = s.get("tokens") or {}
     print(
         s.get("session_id"),
         "assistant_turns=", s.get("asst_count"),
-        "token_turns=", tokens.get("turns"),
         "cwd=", s.get("cwd"),
     )
 PY
 ```
 
-For the sample database snapshot used during development, `list --all` showed 10 top-level sessions: there were 11 session rows, none archived, and one child session (non-empty `parent_id`) that should be omitted. In that snapshot, session `ses_fc9a53cc7ffeOFRkRIJulZ2QCw` had three user messages and ten assistant message records. The records shared three `parentID` values, so the expected `asst_count` and `tokens.turns` are **3**, not 10; tool-call continuations count as part of their parent user turn. Your session count may differ if the database has changed.
+For the sample database snapshot used during development, `list --all` showed 10 top-level sessions: there were 11 session rows, none archived, and one child session (non-empty `parent_id`) that should be omitted. In that snapshot, session `ses_fc9a53cc7ffeOFRkRIJulZ2QCw` had three user messages and ten assistant message records. The records shared three `parentID` values, so the expected `asst_count` is **3**, not 10; tool-call continuations count as part of their parent user turn. Your session count may differ if the database has changed.
 
 To verify resume behavior, start the picker and select a session. It should open the corresponding OpenCode session; do not submit a new prompt unless you intend to modify it:
 
@@ -95,7 +93,7 @@ for s in sessions:
 PY
 ```
 
-Compare session IDs, titles, working directories, timestamps, and first/last prompts with Kimi Code's own session history. Prompt text is included in the JSON file, so review it locally rather than sharing the raw file. The Kimi provider reads `state.json` and the main agent's `agents/main/wire.jsonl`; subagent streams are excluded. In the 2.1.x wire format, completed main-agent turns come from `turn.ended` and token deltas are summed from `usage.record`. Sessions without those records may still have a `null` token summary.
+Compare session IDs, titles, working directories, timestamps, and first/last prompts with Kimi Code's own session history. Prompt text is included in the JSON file, so review it locally rather than sharing the raw file. The Kimi provider reads `state.json` and the main agent's `agents/main/wire.jsonl`; subagent streams are excluded. In the 2.1.x wire format, completed main-agent turns come from `turn.ended`.
 
 Verify resume behavior by selecting a session in the picker:
 

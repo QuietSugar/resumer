@@ -2,28 +2,6 @@ package textutil
 
 import "testing"
 
-func TestFmtTokens(t *testing.T) {
-	cases := []struct {
-		in   int64
-		want string
-	}{
-		{0, "—"},
-		{-5, "—"},
-		{999, "999"},
-		{1000, "1.0K"},
-		{1500, "1.5K"},
-		{9999, "10.0K"},
-		{10000, "10K"},
-		{285120, "285K"},
-		{10014000, "10,014K"},
-	}
-	for _, c := range cases {
-		if got := FmtTokens(c.in); got != c.want {
-			t.Errorf("FmtTokens(%d) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 func TestFmtTS(t *testing.T) {
 	if got := FmtTS("2026-04-15T01:00:05.000Z", true); got != "2026-04-15 01:00:05" {
 		t.Errorf("with year: %q", got)

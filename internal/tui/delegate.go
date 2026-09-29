@@ -95,11 +95,6 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	proj := textutil.PadDisplay(textutil.TrimDisplay(s.ProjectLabel, colProject), colProject)
 	title := textutil.PadDisplay(textutil.TrimDisplay(s.Title, colTitle), colTitle)
 	marker := textutil.PadDisplay(textutil.VolumeMarker(s.AsstCount+len(s.Prompts)), 2)
-	var tokTotal int64
-	if s.Tokens != nil {
-		tokTotal = s.Tokens.Input
-	}
-	tok := fmt.Sprintf("%9s", textutil.FmtTokens(tokTotal))
 
 	selected := index == m.Index()
 	cursor := "  "
@@ -109,8 +104,8 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 		rowStyle = selectedStyle
 	}
 
-	row := fmt.Sprintf("%s%s %s %s %s %s %s",
-		cursor, dimStyle.Render(last), badge, rowStyle.Render(proj), dimStyle.Render(title), marker, dimStyle.Render(tok))
+	row := fmt.Sprintf("%s%s %s %s %s %s",
+		cursor, dimStyle.Render(last), badge, rowStyle.Render(proj), dimStyle.Render(title), marker)
 
 	// Clip to the list's width so long rows never wrap and break the layout.
 	fmt.Fprint(w, lipgloss.NewStyle().MaxWidth(m.Width()).Render(row))

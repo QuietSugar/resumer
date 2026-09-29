@@ -1,6 +1,6 @@
 // Package claudecode parses Claude Code session JSONL files under
 // ~/.claude/projects. Behavior is a direct port of the Python provider:
-// fake-prompt filtering, token aggregation, custom/ai titles, plan-file
+// fake-prompt filtering, custom/ai titles, plan-file
 // subtitles, fork detection, and the encoded-dir cwd resolution fix.
 package claudecode
 
@@ -134,12 +134,6 @@ type contentBlock struct {
 type messageBody struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
-	Usage   *struct {
-		InputTokens              int64 `json:"input_tokens"`
-		OutputTokens             int64 `json:"output_tokens"`
-		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-	} `json:"usage"`
 }
 
 type record struct {
@@ -191,7 +185,6 @@ func (p *Provider) parseJSONL(path string) *session.Session {
 	planPath := ""
 	customTitle := ""
 	aiTitle := ""
-	tokens := session.TokenUsage{}
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -240,13 +233,6 @@ func (p *Provider) parseJSONL(path string) *session.Session {
 			}
 			if role == "assistant" {
 				asstCount++
-				if msg.Usage != nil {
-					tokens.Input += msg.Usage.InputTokens
-					tokens.Output += msg.Usage.OutputTokens
-					tokens.CacheRead += msg.Usage.CacheReadInputTokens
-					tokens.CacheCreate += msg.Usage.CacheCreationInputTokens
-					tokens.Turns++
-				}
 			}
 			var blocks []contentBlock
 			if err := json.Unmarshal(msg.Content, &blocks); err == nil {
@@ -323,12 +309,6 @@ func (p *Provider) parseJSONL(path string) *session.Session {
 		firstPrompt = prompts[0].Text
 		lastPrompt = prompts[len(prompts)-1].Text
 	}
-	var tok *session.TokenUsage
-	if tokens.Turns > 0 {
-		t := tokens
-		tok = &t
-	}
-
 	return &session.Session{
 		Source:       "claude-code",
 		SessionID:    sessionID,
@@ -343,7 +323,6 @@ func (p *Provider) parseJSONL(path string) *session.Session {
 		LastPrompt:   lastPrompt,
 		Prompts:      prompts,
 		AsstCount:    asstCount,
-		Tokens:       tok,
 		ResumeArgv:   []string{"claude", "--resume", sessionID},
 	}
 }
