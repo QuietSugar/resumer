@@ -56,6 +56,17 @@ func TestFixtureParsing(t *testing.T) {
 	}
 }
 
+func TestExtractTextContentBlockTypes(t *testing.T) {
+	for _, typ := range []string{"text", "input_text", "output_text"} {
+		t.Run(typ, func(t *testing.T) {
+			got := extractText([]byte(`[ {"type":"` + typ + `","text":"hello"} ]`))
+			if got != "hello" {
+				t.Fatalf("extractText() = %q, want hello", got)
+			}
+		})
+	}
+}
+
 func TestProjectAndDateFilters(t *testing.T) {
 	t.Setenv("RESUMER_CODEBUDDY_HOME", fixtureRoot(t))
 	p := New()

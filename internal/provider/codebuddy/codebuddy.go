@@ -95,8 +95,11 @@ func extractText(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &blocks) == nil {
 		var parts []string
 		for _, block := range blocks {
-			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
-				parts = append(parts, strings.TrimSpace(block.Text))
+			switch block.Type {
+			case "text", "input_text", "output_text":
+				if text := strings.TrimSpace(block.Text); text != "" {
+					parts = append(parts, text)
+				}
 			}
 		}
 		return strings.TrimSpace(strings.Join(parts, "\n"))
