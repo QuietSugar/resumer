@@ -39,6 +39,11 @@ Useful flags (both picker and `list`): `--days N`, `--date YYYY-MM-DD`, `--all`,
 assistant activity figure are provider-specific rough size estimates; counting
 rules differ and the values are not exact or directly comparable across providers.
 
+The picker tips pane uses provider-specific built-in tips by default. To replace
+these with your own plain-text tips, create `~/.config/resumer/tips.md` or set
+`RESUMER_TIPS_FILE` to another file path. The file is read when the picker
+starts; a missing or blank file falls back to the built-in tips.
+
 ## Enabling / disabling providers
 
 Each provider can be turned off; a disabled provider is **not scanned or

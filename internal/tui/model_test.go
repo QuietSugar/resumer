@@ -2,6 +2,8 @@ package tui
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +87,7 @@ func TestRowDelegateRendersTitleWithoutFirstPrompt(t *testing.T) {
 }
 
 func TestTipsPaneUsesSelectedProviderAndAdaptsToWidth(t *testing.T) {
+	t.Setenv("RESUMER_TIPS_FILE", filepath.Join(t.TempDir(), "missing-tips.md"))
 	m := NewModel([]provider.Provider{&refreshProvider{}}, session.Filters{})
 	m.width, m.height = 120, 30
 	m.resize()
@@ -102,6 +105,27 @@ func TestTipsPaneUsesSelectedProviderAndAdaptsToWidth(t *testing.T) {
 	}
 }
 
+func TestCustomTipsOverrideProviderDefaultsInPanel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tips.md")
+	if err := os.WriteFile(path, []byte("My custom tips\nUse /resume to switch sessions."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RESUMER_TIPS_FILE", path)
+
+	m := NewModel([]provider.Provider{&refreshProvider{}}, session.Filters{})
+	m.width, m.height = 120, 30
+	m.resize()
+	m.list.SetItems([]list.Item{sessionItem{s: session.Session{Source: "codebuddy", SessionID: "id"}}})
+	m.preview.SetContent("session detail")
+	view := m.View()
+	if !strings.Contains(view, "My custom tips") || !strings.Contains(view, "Use /resume to switch sessions.") {
+		t.Fatalf("custom tips were not rendered in the panel:\n%s", view)
+	}
+	if strings.Contains(view, "Rename: /rename") {
+		t.Fatalf("custom tips should replace the built-in CodeBuddy tips:\n%s", view)
+	}
+}
+
 func TestTipsForSourceExplainsProviderSpecificDeletion(t *testing.T) {
 	if got := tipsForSource("opencode"); !strings.Contains(got, "opencode session delete") {
 		t.Fatalf("OpenCode tips are missing delete command: %q", got)
@@ -111,6 +135,12 @@ func TestTipsForSourceExplainsProviderSpecificDeletion(t *testing.T) {
 	}
 	if got := tipsForSource("codex"); !strings.Contains(got, "differ by Agent/version") {
 		t.Fatalf("generic tips should warn that deletion differs: %q", got)
+	}
+	codeBuddyTips := tipsForSource("codebuddy")
+	for _, want := range []string{"/resume", "/rename", "DELETE /api/v1/sessions/:id", "--dry-run"} {
+		if !strings.Contains(codeBuddyTips, want) {
+			t.Errorf("CodeBuddy tips are missing %q: %q", want, codeBuddyTips)
+		}
 	}
 }
 

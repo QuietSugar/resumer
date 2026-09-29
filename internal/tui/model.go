@@ -66,6 +66,7 @@ type Model struct {
 	width      int
 	height     int
 	tipsWidth  int
+	customTips string
 	ready      bool
 }
 
@@ -88,13 +89,14 @@ func NewModel(providers []provider.Provider, filters session.Filters) Model {
 	}
 
 	return Model{
-		filters:   filters,
-		providers: providers,
-		list:      l,
-		preview:   viewport.New(0, 0),
-		spin:      sp,
-		sources:   sources,
-		pending:   len(providers),
+		filters:    filters,
+		providers:  providers,
+		list:       l,
+		preview:    viewport.New(0, 0),
+		spin:       sp,
+		sources:    sources,
+		pending:    len(providers),
+		customTips: loadCustomTips(),
 	}
 }
 
@@ -303,23 +305,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func tipsForSource(source string) string {
 	lines := []string{
-		"Session deletion",
-		"resumer only browses and resumes; it does not delete sessions.",
+		"Session tips",
+		"resumer only browses and resumes.",
 		"",
 	}
 	switch source {
 	case "opencode":
 		lines = append(lines,
-			"OpenCode",
+			"OpenCode: delete with",
 			"opencode session delete",
 			"<sessionID>",
 		)
 	case "kimi-code":
 		lines = append(lines,
-			"Kimi Code",
-			"Open its session picker,",
-			"select a session, press",
-			"Ctrl+X, then confirm.",
+			"Kimi Code: open its session",
+			"picker, select a session,",
+			"press Ctrl+X, then confirm.",
+		)
+	case "codebuddy":
+		lines = append(lines,
+			"CodeBuddy",
+			"Switch: /resume <session-id>",
+			"Picker: codebuddy --resume",
+			"Latest: codebuddy --continue",
+			"Rename: /rename <name>",
+			"New: /clear (history stays)",
+			"Delete one: Beta HTTP API",
+			"DELETE /api/v1/sessions/:id",
+			"Project purge is broader.",
+			"Preview purge: --dry-run.",
 		)
 	default:
 		lines = append(lines,
@@ -363,7 +377,11 @@ func (m Model) View() string {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			source = item.s.Source
 		}
-		tips := tipsStyle.Width(m.tipsWidth - 1).Height(m.preview.Height).Render(tipsForSource(source))
+		tipText := m.customTips
+		if tipText == "" {
+			tipText = tipsForSource(source)
+		}
+		tips := tipsStyle.Width(m.tipsWidth - 1).Height(m.preview.Height).Render(tipText)
 		preview = lipgloss.JoinHorizontal(lipgloss.Top, preview, "  ", tips)
 	}
 	b.WriteString(previewStyle.Width(m.width).Render(preview))
