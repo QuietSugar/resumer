@@ -43,10 +43,17 @@ Each provider can be turned off; a disabled provider is **not scanned or
 parsed at all** — no storage walk, no file/db reads — until turned back on.
 
 ```bash
-resumer provider list        # name, on/off state, storage detected?
+resumer provider             # interactive checkboxes — ↑↓ move, space
+                             # toggle, enter saves, esc cancels
+resumer provider list        # plain table: state + storage detected?
 resumer provider off opencode
 resumer provider on opencode
 ```
+
+`resumer provider` needs a terminal; piped stdin prints the table instead.
+Untoggling everything and saving re-enables all providers; providers that
+have disappeared from resumer (config outlived an upgrade) show as
+`(unknown)` so stale entries stay visible and clearable.
 
 The state persists in `~/.config/resumer/config.json` (`$RESUMER_CONFIG`
 overrides the path; `$XDG_CONFIG_HOME` overrides its directory). Disabled

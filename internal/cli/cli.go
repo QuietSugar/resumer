@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/x/term"
 
 	"github.com/jin-ttao/resumer/internal/config"
 	"github.com/jin-ttao/resumer/internal/execres"
@@ -39,8 +42,9 @@ Unified AI CLI session resumer.
 
   resumer              interactive picker across all active providers
   resumer list         render merged session list (no interaction)
-  resumer provider     manage providers; a disabled provider is not scanned
-                       or parsed at all until turned back on
+  resumer provider     interactive on/off checkboxes (space toggle, enter
+                       saves); a disabled provider is not scanned or parsed
+                       at all until turned back on
 
 options:
   --source NAME    limit to a single provider (claude-code | codex | kimi-code | opencode)
@@ -232,33 +236,25 @@ func runPicker(filters session.Filters) int {
 // runProviderCmd implements `resumer provider [list | on NAME | off NAME]`.
 // State is persisted to the config file; unknown subcommands exit 2.
 func runProviderCmd(args []string) int {
-	sub := "list"
+	sub := "" // bare `resumer provider` — the interactive toggle screen
 	if len(args) > 0 {
 		sub = args[0]
 		args = args[1:]
 	}
 
 	switch sub {
-	case "list", "":
+	case "":
+		// Bare `resumer provider` — interactive checkbox screen on a TTY,
+		// the plain table otherwise.
+		return runProviderToggleUI()
+
+	case "list":
 		cfg, err := config.Load()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 2
 		}
-		fmt.Printf("%-12s %-5s %-10s %s\n", "PROVIDER", "STATE", "STORAGE", "CONFIG")
-		for _, p := range provider.All() {
-			state, storage := "on", "ok"
-			cfgNote := "-"
-			if !p.IsAvailable() {
-				storage = "missing"
-			}
-			if cfg.IsDisabled(p.Name()) {
-				state = "off"
-				cfgNote = "disabled"
-			}
-			fmt.Printf("%-12s %-5s %-10s %s\n", p.Name(), state, storage, cfgNote)
-		}
-		return 0
+		return printProviderList(cfg)
 
 	case "on", "off":
 		if len(args) == 0 {
@@ -299,6 +295,99 @@ func runProviderCmd(args []string) int {
 			"error: unknown provider subcommand: %q (choose from list, on, off)\n", sub)
 		return 2
 	}
+}
+
+// printProviderList writes the plain text state table (also the fallback for
+// `resumer provider` when stdin is not a TTY).
+func printProviderList(cfg config.Config) int {
+	fmt.Printf("%-12s %-5s %-10s %s\n", "PROVIDER", "STATE", "STORAGE", "CONFIG")
+	for _, p := range provider.All() {
+		state, storage := "on", "ok"
+		cfgNote := "-"
+		if !p.IsAvailable() {
+			storage = "missing"
+		}
+		if cfg.IsDisabled(p.Name()) {
+			state = "off"
+			cfgNote = "disabled"
+		}
+		fmt.Printf("%-12s %-5s %-10s %s\n", p.Name(), state, storage, cfgNote)
+	}
+	return 0
+}
+
+// runProviderToggleUI opens the interactive checkbox screen for bare
+// `resumer provider`. On save it persists the resulting disabled list; esc
+// leaves the config untouched. Scripted (non-TTY) stdin falls back to the
+// text table instead of hanging on a UI it cannot answer.
+func runProviderToggleUI() int {
+	// Mutating path: never proceed on an unreadable config — Save would
+	// clobber it.
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: refusing to rewrite unreadable config: %v\n", err)
+		return 2
+	}
+	if !stdinIsTerminal() {
+		return printProviderList(cfg)
+	}
+
+	disabled := map[string]bool{}
+	for _, d := range cfg.Disabled {
+		disabled[d] = true
+	}
+	var names []string
+	storage := map[string]bool{}
+	for _, p := range provider.All() {
+		names = append(names, p.Name())
+		storage[p.Name()] = p.IsAvailable()
+	}
+
+	result, canceled, err := tui.ProviderToggle(names, disabled, storage)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	if canceled {
+		fmt.Println("cancelled — config unchanged.")
+		return 0
+	}
+	sameSet := len(cfg.Disabled) == len(result)
+	if sameSet {
+		want := map[string]bool{}
+		for _, d := range cfg.Disabled {
+			want[d] = true
+		}
+		for _, r := range result {
+			if !want[r] {
+				sameSet = false
+				break
+			}
+		}
+	}
+	if sameSet {
+		fmt.Println("no changes.")
+		return 0
+	}
+	cfg.Disabled = result
+	sort.Strings(cfg.Disabled)
+	if err := config.Save(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "error: saving config: %v\n", err)
+		return 2
+	}
+	if len(result) == 0 {
+		fmt.Println("all providers enabled.")
+	} else {
+		fmt.Printf("disabled: %s\n", strings.Join(result, ", "))
+	}
+	return 0
+}
+
+// stdinIsTerminal reports whether stdin is an interactive terminal. Uses the
+// charmbracelet/x/term package already in the dependency graph (bubbletea's
+// own terminal layer) — no new module.
+func stdinIsTerminal() bool {
+	return term.IsTerminal(os.Stdin.Fd())
 }
 
 // providerNames lists registered provider names in registry order.
