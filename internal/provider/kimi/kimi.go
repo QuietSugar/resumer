@@ -16,10 +16,10 @@
 // Resume command: `kimi --session <sessionId>` (run from the session's
 // recorded workDir, which resumer passes via Session.Cwd).
 //
-// The wire.jsonl event schema is not part of the public docs, so the parser
-// is deliberately defensive: user/assistant turns are recognized by role in
-// either a top-level record or a nested "message" object, and content may be
-// a plain string or a list of {type,text} blocks.
+// Kimi Code 2.1.x stores durable v2 events in wire.jsonl: user inputs appear
+// in turn.prompt/context.append_message, completed replies in turn.ended, and
+// token deltas in usage.record. Older role-based message events remain a
+// best-effort fallback. Content may be a string or typed {type,text} blocks.
 package kimi
 
 import (
@@ -143,6 +143,7 @@ type contentBlock struct {
 type messageBody struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
+	Origin  json.RawMessage `json:"origin"`
 }
 
 type wireRecord struct {
@@ -152,8 +153,14 @@ type wireRecord struct {
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
 	Role      string          `json:"role"`
+	TurnID    json.RawMessage `json:"turnId"`
+	PromptID  string          `json:"promptId"`
+	Reason    string          `json:"reason"`
 	Message   json.RawMessage `json:"message"`
 	Content   json.RawMessage `json:"content"`
+	Input     json.RawMessage `json:"input"`
+	Origin    json.RawMessage `json:"origin"`
+	Usage     json.RawMessage `json:"usage"`
 }
 
 // recordTS resolves a record's timestamp: epoch-ms `time` first (the real
@@ -195,6 +202,116 @@ func extractText(raw json.RawMessage) string {
 func isRealPrompt(txt string) bool {
 	s := strings.TrimSpace(txt)
 	return s != "" && !strings.HasPrefix(s, "<")
+}
+
+// promptOrigin decodes both the current PromptOrigin object and the legacy
+// string form stored in ContextMessage.origin. The boolean reports whether
+// the origin was recognizable; unknown origins retain the legacy text filter.
+func promptOrigin(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false
+	}
+	var value string
+	if json.Unmarshal(raw, &value) == nil && value != "" {
+		return value, true
+	}
+	var object struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(raw, &object) == nil && object.Kind != "" {
+		return object.Kind, true
+	}
+	return "", false
+}
+
+func includePrompt(text string, origin json.RawMessage) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	if kind, known := promptOrigin(origin); known {
+		return kind == "user"
+	}
+	return isRealPrompt(text)
+}
+
+type promptCandidate struct {
+	prompt session.Prompt
+	source string // "turn.prompt" or "context.append_message"
+	order  int
+}
+
+// mergePromptCandidates combines turn.prompt (the submitted user input) and
+// context.append_message (the context transcript). The same prompt is written
+// to both events, usually milliseconds apart; collapse only cross-source,
+// same-text pairs close in time so intentionally repeated prompts survive.
+func mergePromptCandidates(in []promptCandidate) []session.Prompt {
+	paired := make([]bool, len(in))
+	byText := map[string]map[string][]int{}
+	for i, candidate := range in {
+		text := candidate.prompt.Text
+		if byText[text] == nil {
+			byText[text] = map[string][]int{}
+		}
+		byText[text][candidate.source] = append(byText[text][candidate.source], i)
+	}
+	for _, sources := range byText {
+		turns, messages := sources["turn.prompt"], sources["context.append_message"]
+		for _, ti := range turns {
+			tt, okT := textutil.ParseISO(in[ti].prompt.TS)
+			if !okT {
+				continue
+			}
+			best, bestDelta := -1, time.Duration(1<<63-1)
+			for _, mi := range messages {
+				if paired[mi] {
+					continue
+				}
+				mt, okM := textutil.ParseISO(in[mi].prompt.TS)
+				if !okM {
+					continue
+				}
+				delta := tt.Sub(mt)
+				if delta < 0 {
+					delta = -delta
+				}
+				if delta <= 2*time.Second && delta < bestDelta {
+					best, bestDelta = mi, delta
+				}
+			}
+			if best >= 0 {
+				paired[ti] = true // retain the transcript's timestamp/text
+				paired[best] = true
+			}
+		}
+	}
+
+	candidates := make([]promptCandidate, 0, len(in))
+	for i, candidate := range in {
+		if paired[i] {
+			if candidate.source == "context.append_message" {
+				candidates = append(candidates, candidate)
+			}
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		ti, okI := textutil.ParseISO(candidates[i].prompt.TS)
+		tj, okJ := textutil.ParseISO(candidates[j].prompt.TS)
+		if okI != okJ {
+			return okI
+		}
+		if okI && !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		return candidates[i].order < candidates[j].order
+	})
+	out := make([]session.Prompt, len(candidates))
+	for i, candidate := range candidates {
+		out[i] = candidate.prompt
+	}
+	return out
 }
 
 // normalizeTS passes ISO timestamps through untouched (the session struct and
@@ -324,25 +441,78 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 		forkedFrom = state.ForkedAlt
 	}
 
-	// Main-agent event stream; subagents (agents/<subagentId>/) are excluded
-	// on purpose, mirroring the claude-code provider's subagents skip.
+	// The 2.1.x main-agent wire stream stores submitted prompts in
+	// turn.prompt/context.append_message, completed replies in turn.ended,
+	// loop content in context.append_loop_event, and usage deltas in
+	// usage.record. Subagents are in separate files and are not scanned.
 	firstTS, lastTS := "", ""
-	asstCount := 0
-	var prompts []session.Prompt
+	legacyAssistantCount := 0
+	hasTurnEndedEvents, hasPromptCompletedEvents := false, false
+	turnEnds, promptEnds := map[string]bool{}, map[string]bool{}
+	var promptCandidates []promptCandidate
+	var usage session.TokenUsage
+	usageRecords := 0
 	if f, err := os.Open(filepath.Join(dir, "agents", "main", "wire.jsonl")); err == nil {
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 0, 64<<10), maxLineBytes)
+		lineOrder := 0
 		for sc.Scan() {
 			var r wireRecord
 			if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
 				continue
 			}
+			lineOrder++
 			if ts := recordTS(r); ts != "" {
 				firstTS = earlierTS(firstTS, ts)
 				lastTS = laterTS(lastTS, ts)
 			}
-			role := r.Role
-			content := r.Content
+			switch r.Type {
+			case "turn.ended":
+				hasTurnEndedEvents = true
+				if r.Reason == "completed" {
+					key := strings.TrimSpace(string(r.TurnID))
+					if key == "" || key == "null" {
+						key = recordTS(r)
+					}
+					turnEnds[key] = true
+				}
+			case "prompt.completed":
+				hasPromptCompletedEvents = true
+				if r.Reason == "completed" {
+					key := r.PromptID
+					if key == "" {
+						key = recordTS(r)
+					}
+					promptEnds[key] = true
+				}
+			case "usage.record":
+				var recorded struct {
+					InputOther        int64 `json:"inputOther"`
+					Output            int64 `json:"output"`
+					InputCacheRead    int64 `json:"inputCacheRead"`
+					InputCacheCreated int64 `json:"inputCacheCreation"`
+				}
+				if len(r.Usage) > 0 && json.Unmarshal(r.Usage, &recorded) == nil {
+					usage.Input += recorded.InputOther
+					usage.Output += recorded.Output
+					usage.CacheRead += recorded.InputCacheRead
+					usage.CacheCreate += recorded.InputCacheCreated
+					usageRecords++
+				}
+			}
+
+			if r.Type == "turn.prompt" {
+				if txt := extractText(r.Input); includePrompt(txt, r.Origin) {
+					promptCandidates = append(promptCandidates, promptCandidate{
+						prompt: session.Prompt{TS: recordTS(r), Text: strings.TrimSpace(txt)},
+						source: "turn.prompt",
+						order:  lineOrder,
+					})
+				}
+			}
+
+			role, content := r.Role, r.Content
+			origin := r.Origin
 			if len(r.Message) > 0 {
 				var msg messageBody
 				if err := json.Unmarshal(r.Message, &msg); err == nil {
@@ -352,27 +522,41 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 					if len(msg.Content) > 0 {
 						content = msg.Content
 					}
+					if len(msg.Origin) > 0 {
+						origin = msg.Origin
+					}
 				}
 			}
-			// Real kimi-code records are flattened events:
-			// {type:"agent.message.appended", message:{role,content}, time}.
-			// The user_message branch is defensive for older/other shapes.
 			if r.Type == "user_message" && role == "" {
 				role = "user"
 			}
 			switch role {
 			case "user":
-				if txt := extractText(content); isRealPrompt(txt) {
-					prompts = append(prompts, session.Prompt{
-						TS:   recordTS(r),
-						Text: strings.TrimSpace(txt),
+				if txt := extractText(content); includePrompt(txt, origin) {
+					promptCandidates = append(promptCandidates, promptCandidate{
+						prompt: session.Prompt{TS: recordTS(r), Text: strings.TrimSpace(txt)},
+						source: "context.append_message",
+						order:  lineOrder,
 					})
 				}
 			case "assistant":
-				asstCount++
+				legacyAssistantCount++
 			}
 		}
 		f.Close()
+	}
+	prompts := mergePromptCandidates(promptCandidates)
+	asstCount := legacyAssistantCount
+	switch {
+	case hasTurnEndedEvents:
+		asstCount = len(turnEnds)
+	case hasPromptCompletedEvents:
+		asstCount = len(promptEnds)
+	}
+	usage.Turns = int64(asstCount)
+	var tokens *session.TokenUsage
+	if usageRecords > 0 || asstCount > 0 {
+		tokens = &usage
 	}
 
 	firstTS = earlierTS(firstTS, createdAt)
@@ -410,6 +594,10 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 	if lastPrompt == "" {
 		lastPrompt = strings.TrimSpace(state.LastPrompt)
 	}
+	title := strings.TrimSpace(state.Title)
+	if title == "" {
+		title = lastPrompt // native Kimi session listings fall back to lastPrompt
+	}
 
 	return &session.Session{
 		Source:       "kimi-code",
@@ -419,13 +607,13 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 		Cwd:          cwd,
 		FirstTS:      firstTS,
 		LastTS:       lastTS,
-		Title:        strings.TrimSpace(state.Title),
+		Title:        title,
 		Subtitle:     subtitle,
 		FirstPrompt:  firstPrompt,
 		LastPrompt:   lastPrompt,
 		Prompts:      prompts,
 		AsstCount:    asstCount,
-		Tokens:       nil, // wire usage schema undocumented; no reliable aggregation yet
+		Tokens:       tokens,
 		ResumeArgv:   []string{"kimi", "--session", sessionID},
 	}
 }

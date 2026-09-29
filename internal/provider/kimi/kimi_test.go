@@ -36,10 +36,10 @@ func listAll(t *testing.T) map[string]session.Session {
 
 func TestFixtureParsing(t *testing.T) {
 	sessions := listAll(t)
-	// 3 session dirs carry state.json; the stray bucket without one must be
+	// 4 session dirs carry state.json; the stray bucket without one must be
 	// skipped entirely.
-	if len(sessions) != 3 {
-		t.Fatalf("expected 3 valid kimi sessions, got %d", len(sessions))
+	if len(sessions) != 4 {
+		t.Fatalf("expected 4 valid kimi sessions, got %d", len(sessions))
 	}
 
 	one := sessions["dddd0001-1111-7000-8000-000000000001"]
@@ -75,12 +75,40 @@ func TestFixtureParsing(t *testing.T) {
 	if len(one.Prompts) > 0 && one.Prompts[0].TS != "2026-04-15T05:30:05Z" {
 		t.Errorf("prompt ts = %q", one.Prompts[0].TS)
 	}
-	if one.Tokens != nil {
-		t.Error("kimi sessions carry no token usage yet")
+	if one.Tokens == nil || one.Tokens.Turns != 2 || one.Tokens.Input != 0 || one.Tokens.Output != 0 {
+		t.Errorf("legacy fixture token summary = %+v, want turns only", one.Tokens)
 	}
 	if len(one.ResumeArgv) != 3 || one.ResumeArgv[0] != "kimi" ||
 		one.ResumeArgv[1] != "--session" || one.ResumeArgv[2] != one.SessionID {
 		t.Errorf("resume argv = %v", one.ResumeArgv)
+	}
+}
+
+func TestKimiV2Events(t *testing.T) {
+	sessions := listAll(t)
+	got := sessions["dddd0004-4444-7000-8000-000000000004"]
+	if got.SessionID == "" {
+		t.Fatal("v2 event-format session missing")
+	}
+	if got.AsstCount != 2 {
+		t.Errorf("assistant turns = %d, want 2 completed turn.ended events", got.AsstCount)
+	}
+	if got.Tokens == nil {
+		t.Fatal("usage.record events should produce token totals")
+	}
+	if got.Tokens.Input != 30 || got.Tokens.Output != 12 ||
+		got.Tokens.CacheRead != 7 || got.Tokens.CacheCreate != 3 || got.Tokens.Turns != 2 {
+		t.Errorf("token totals = %+v", got.Tokens)
+	}
+	if len(got.Prompts) != 2 || got.FirstPrompt != "kimi v2 first prompt" ||
+		got.LastPrompt != "kimi v2 second prompt" {
+		t.Errorf("v2 prompts = %+v; first=%q last=%q", got.Prompts, got.FirstPrompt, got.LastPrompt)
+	}
+	if got.Title != "kimi v2 second prompt" {
+		t.Errorf("untitled session should fall back to lastPrompt, got %q", got.Title)
+	}
+	if got.Prompts[0].TS != "2026-04-15T05:30:01Z" {
+		t.Errorf("prompt timestamp = %q", got.Prompts[0].TS)
 	}
 }
 
@@ -161,8 +189,8 @@ func TestDateFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(on) != 3 {
-		t.Errorf("on-day date filter: got %d, want 3", len(on))
+	if len(on) != 4 {
+		t.Errorf("on-day date filter: got %d, want 4", len(on))
 	}
 }
 
@@ -212,7 +240,7 @@ func TestMissingIndexDegradesSilently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 3 {
+	if len(sessions) != 4 {
 		t.Fatalf("got %d sessions", len(sessions))
 	}
 }

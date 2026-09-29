@@ -2,3 +2,4 @@
 {"sessionId":"dddd0002-2222-7000-8000-000000000002","sessionDir":"/Users/demo/.kimi-code/sessions/wd_tmp-resumer-fixtures-kimi-two_bbbbbbbbbbbb/dddd0002-2222-7000-8000-000000000002","workDir":"/tmp/resumer-fixtures/kimi-two"}
 {not valid json at all} this line must be silently skipped
 {"sessionId":"","sessionDir":"/x","workDir":"/y"}
+{"sessionId":"dddd0004-4444-7000-8000-000000000004","sessionDir":"/Users/demo/.kimi-code/sessions/wd_tmp-resumer-fixtures-kimi-four_eeeeeeeeeeee/dddd0004-4444-7000-8000-000000000004","workDir":"/tmp/resumer-fixtures/kimi-four"}

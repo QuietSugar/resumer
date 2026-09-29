@@ -95,7 +95,7 @@ for s in sessions:
 PY
 ```
 
-Compare session IDs, titles, working directories, timestamps, and first/last prompts with Kimi Code's own session history. Prompt text is included in the JSON file, so review it locally rather than sharing the raw file. The Kimi provider reads `state.json` and the main agent's `agents/main/wire.jsonl`; subagent streams are excluded. Token usage is currently `null` because the wire stream does not provide a reliable common token aggregate.
+Compare session IDs, titles, working directories, timestamps, and first/last prompts with Kimi Code's own session history. Prompt text is included in the JSON file, so review it locally rather than sharing the raw file. The Kimi provider reads `state.json` and the main agent's `agents/main/wire.jsonl`; subagent streams are excluded. In the 2.1.x wire format, completed main-agent turns come from `turn.ended` and token deltas are summed from `usage.record`. Sessions without those records may still have a `null` token summary.
 
 Verify resume behavior by selecting a session in the picker:
 
