@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -67,15 +68,36 @@ func TestCtrlRRescansAndUpdatesSessionMetadata(t *testing.T) {
 	}
 }
 
-func TestRowDelegateRendersTitleColumn(t *testing.T) {
+func TestRowDelegateRendersTitleWithoutFirstPrompt(t *testing.T) {
 	m := list.New(nil, rowDelegate{}, 240, 3)
 	item := sessionItem{s: session.Session{
 		Source: "test", SessionID: "session-1", ProjectLabel: "project",
-		Title: "A distinct session title", FirstPrompt: "hello",
+		Title: "A distinct session title", FirstPrompt: "prompt belongs in details",
 	}}
 	var b bytes.Buffer
 	(rowDelegate{}).Render(&b, m, 0, item)
 	if !strings.Contains(b.String(), "A distinct session title") {
 		t.Fatalf("rendered row does not contain session title: %q", b.String())
+	}
+	if strings.Contains(b.String(), "prompt belongs in details") {
+		t.Fatalf("first prompt should not appear in the list row: %q", b.String())
+	}
+}
+
+func TestFormatLastActivity(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		ts, want string
+	}{
+		{"2026-09-25T06:30:00Z", "4d5h"},
+		{"2026-09-29T07:55:00Z", "4h5m"},
+		{"2026-09-29T11:35:00Z", "25m"},
+		{"2026-09-29T12:01:00Z", "now"},
+		{"invalid", "?"},
+	}
+	for _, tc := range cases {
+		if got := formatLastActivity(tc.ts, now); got != tc.want {
+			t.Errorf("formatLastActivity(%q) = %q, want %q", tc.ts, got, tc.want)
+		}
 	}
 }

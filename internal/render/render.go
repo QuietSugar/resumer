@@ -141,6 +141,9 @@ func FullBox(s *session.Session) string {
 	}
 	lines = append(lines, "├"+bar)
 	lines = append(lines, "│ opening prompts")
+	if len(s.Prompts) == 0 && s.FirstPrompt != "" {
+		add("│  %s", textutil.Trim(s.FirstPrompt, 350))
+	}
 	openEnd := len(s.Prompts)
 	if openEnd > 3 {
 		openEnd = 3
