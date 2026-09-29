@@ -24,6 +24,7 @@ const (
 var (
 	badgeStyle = map[string]lipgloss.Style{
 		"claude-code": lipgloss.NewStyle().Foreground(lipgloss.Color("2")), // green
+		"codebuddy":   lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
 		"codex":       lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
 		"kimi-code":   lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
 		"opencode":    lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // blue
@@ -84,6 +85,9 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	badgeText := "[" + s.Source + "]"
 	if s.Source == "claude-code" {
 		badgeText = "[cc]"
+	}
+	if s.Source == "codebuddy" {
+		badgeText = "[cb]"
 	}
 	if s.Source == "kimi-code" {
 		badgeText = "[kimi]"

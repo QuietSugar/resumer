@@ -91,7 +91,7 @@ func TestProviderToggleAllDisabled(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	env := append(fixtureEnv(t), "RESUMER_CONFIG="+cfgPath)
 
-	for _, name := range []string{"claude-code", "codex", "kimi-code", "opencode"} {
+	for _, name := range []string{"claude-code", "codebuddy", "codex", "kimi-code", "opencode"} {
 		if out, code := runBin(t, env, "provider", "off", name); code != 0 {
 			t.Fatalf("provider off %s: exit=%d out=%q", name, code, out)
 		}

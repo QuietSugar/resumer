@@ -19,6 +19,7 @@ const ansiReset = "\x1b[0m"
 // import provider packages.
 var BadgeANSI = map[string]string{
 	"claude-code": "\x1b[32m", // green
+	"codebuddy":   "\x1b[36m", // cyan
 	"codex":       "\x1b[36m", // cyan
 	"kimi-code":   "\x1b[35m", // magenta
 	"opencode":    "\x1b[34m", // blue
@@ -39,6 +40,8 @@ func Badge(source, ansi string) string {
 	switch source {
 	case "claude-code":
 		text = "[cc]"
+	case "codebuddy":
+		text = "[cb]"
 	case "kimi-code":
 		text = "[kimi]"
 	case "opencode":

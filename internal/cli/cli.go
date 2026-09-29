@@ -18,6 +18,7 @@ import (
 	"github.com/jin-ttao/resumer/internal/execres"
 	"github.com/jin-ttao/resumer/internal/provider"
 	"github.com/jin-ttao/resumer/internal/provider/claudecode"
+	"github.com/jin-ttao/resumer/internal/provider/codebuddy"
 	"github.com/jin-ttao/resumer/internal/provider/codex"
 	"github.com/jin-ttao/resumer/internal/provider/kimi"
 	"github.com/jin-ttao/resumer/internal/provider/opencode"
@@ -29,6 +30,7 @@ import (
 func registerProviders() {
 	if len(provider.All()) == 0 {
 		provider.Register(claudecode.New())
+		provider.Register(codebuddy.New())
 		provider.Register(codex.New())
 		provider.Register(kimi.New())
 		provider.Register(opencode.New())
@@ -47,7 +49,7 @@ Unified AI CLI session resumer.
                        at all until turned back on
 
 options:
-  --source NAME    limit to a single provider (claude-code | codex | kimi-code | opencode)
+  --source NAME    limit to a single provider (claude-code | codebuddy | codex | kimi-code | opencode)
   --days N         only show sessions active in the last N days (default: 7)
   --date DATE      YYYY-MM-DD — only sessions active on this date
   --all            no time filter
@@ -146,10 +148,10 @@ func Run(argv []string, version string) int {
 		fmt.Printf("resumer %s\n", version)
 		return 0
 	}
-	validSources := map[string]bool{"claude-code": true, "codex": true, "kimi-code": true, "opencode": true}
+	validSources := map[string]bool{"claude-code": true, "codebuddy": true, "codex": true, "kimi-code": true, "opencode": true}
 	if *source != "" && !validSources[*source] {
 		fmt.Fprintf(os.Stderr,
-			"error: argument --source: invalid choice: %q (choose from claude-code, codex, kimi-code, opencode)\n", *source)
+			"error: argument --source: invalid choice: %q (choose from claude-code, codebuddy, codex, kimi-code, opencode)\n", *source)
 		return 2
 	}
 
@@ -171,7 +173,7 @@ func Run(argv []string, version string) int {
 	// at `provider on` rather than claiming nothing is installed.
 	if *source == "" && len(provider.AvailableSourceNames()) == 0 {
 		msg := "error: no session providers available. " +
-			"Install claude-code, codex, kimi, or opencode and ensure their session storage exists."
+			"Install Claude Code, CodeBuddy, Codex, Kimi, or OpenCode and ensure their session storage exists."
 		if dis := provider.DisabledNames(); len(dis) > 0 {
 			msg = fmt.Sprintf(
 				"error: no enabled session providers available (disabled: %s). "+
@@ -402,13 +404,12 @@ func providerNames() []string {
 // execResume chdirs into the session's directory and replaces the process
 // with the provider's resume command.
 //
-// For claude-code, prefer a cwd derived from the session file's encoded
-// parent dir. Stored cwd in the JSONL can be stale/mismatched (seen with
-// iCloud/Obsidian paths), causing `claude --resume` to fail because it
-// derives the project dir from the current cwd.
+// For Claude Code and its CodeBuddy fork, prefer a cwd derived from the
+// session file's encoded parent directory. A stale stored cwd can make either
+// CLI fail to locate the project-local session.
 func execResume(s *session.Session) int {
 	targetCwd := ""
-	if s.Source == "claude-code" {
+	if s.Source == "claude-code" || s.Source == "codebuddy" {
 		targetCwd = claudecode.ResolveExecCwd(s.Path, s.Cwd)
 	}
 	if targetCwd == "" {
@@ -437,10 +438,11 @@ func execResume(s *session.Session) int {
 	if err != nil {
 		binName := s.ResumeArgv[0]
 		installHint := map[string]string{
-			"claude":   "https://docs.anthropic.com/en/docs/claude-code/quickstart",
-			"codex":    "https://github.com/openai/codex",
-			"kimi":     "https://github.com/MoonshotAI/kimi-code",
-			"opencode": "https://opencode.ai/docs",
+			"claude":    "https://docs.anthropic.com/en/docs/claude-code/quickstart",
+			"codebuddy": "https://www.codebuddy.ai/docs/cli/reference",
+			"codex":     "https://github.com/openai/codex",
+			"kimi":      "https://github.com/MoonshotAI/kimi-code",
+			"opencode":  "https://opencode.ai/docs",
 		}[binName]
 		fmt.Fprintf(os.Stderr, "error: '%s' not found in PATH\n", binName)
 		if installHint != "" {

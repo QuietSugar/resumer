@@ -103,7 +103,19 @@ RESUMER_KIMI_HOME="$KIMI_DATA" ./resumer --source kimi-code
 
 The resume command is `kimi --session <session-id>`.
 
-## 4. If results differ
+## 4. Test CodeBuddy CLI
+
+CodeBuddy session JSONL files are read from `~/.codebuddy/projects/` by default. Set `CODEBUDDY_HOME` for a custom CodeBuddy root, or set `RESUMER_CODEBUDDY_HOME` to override the root for resumer only.
+
+```bash
+RESUMER_CODEBUDDY_HOME="${CODEBUDDY_HOME:-$HOME/.codebuddy}" \
+  ./resumer list --source codebuddy --json --all \
+  > /tmp/resumer-codebuddy.json
+```
+
+Compare session IDs, titles, working directories, timestamps, and prompts with CodeBuddy's own session picker. The JSON includes prompt text; review it locally and do not share raw session logs. The provider reads `projects/**/*.jsonl` and does not install hooks or modify CodeBuddy settings. Resume behavior uses `codebuddy --resume <session-id>` as documented by CodeBuddy's CLI reference. Storage-layout research was cross-checked against [TokenTracker](https://github.com/xiufengsun/TokenTracker) (snapshot `daa6c55099d34458ff773f6c1edd777f16fb7693`).
+
+## 5. If results differ
 
 Check that the data root points to the directory containing OpenCode's `opencode.db` or Kimi's `sessions/` and `session_index.jsonl`. Use `--all` to avoid the normal date window hiding older sessions. If session IDs or counts differ from the native CLI, keep the raw JSON and session files private; share only the CLI versions, sanitized error message, and the specific mismatching session ID/count needed to diagnose it.
 

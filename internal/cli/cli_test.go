@@ -152,6 +152,7 @@ func TestRunAppliesConfigToRegistry(t *testing.T) {
 	// provider a real or empty-but-existing root so nothing errors.
 	dir := t.TempDir()
 	t.Setenv("RESUMER_CLAUDE_PROJECT_ROOT", dir)
+	t.Setenv("RESUMER_CODEBUDDY_HOME", dir)
 	t.Setenv("RESUMER_CODEX_SESSION_ROOT", dir)
 	t.Setenv("RESUMER_CODEX_INDEX_FILE", filepath.Join(dir, "idx.jsonl"))
 	t.Setenv("RESUMER_KIMI_HOME", dir)

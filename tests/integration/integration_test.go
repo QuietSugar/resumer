@@ -54,6 +54,7 @@ func fixtureEnv(t *testing.T) []string {
 		"HOME=" + os.Getenv("HOME"),
 		"TERM=xterm-256color",
 		"RESUMER_CLAUDE_PROJECT_ROOT=" + filepath.Join(repoRoot, "tests", "fixtures", "claude-code"),
+		"RESUMER_CODEBUDDY_HOME=" + filepath.Join(repoRoot, "tests", "fixtures", "codebuddy"),
 		"RESUMER_CODEX_SESSION_ROOT=" + filepath.Join(repoRoot, "tests", "fixtures", "codex"),
 		"RESUMER_CODEX_INDEX_FILE=" + filepath.Join(repoRoot, "tests", "fixtures", "codex", "session_index.jsonl"),
 		"RESUMER_CODEX_BIN=codex",
@@ -75,6 +76,7 @@ func materializeFixtureCwds(t *testing.T) {
 	for _, d := range []string{
 		"/tmp/resumer-fixtures/alpha",
 		"/tmp/resumer-fixtures/beta",
+		"/tmp/resumer-fixtures/codebuddy-alpha",
 		"/tmp/resumer-fixtures/obsidian path with space/vault",
 		"/tmp/resumer-fixtures/kimi-one",
 		"/tmp/resumer-fixtures/kimi-two",
@@ -99,7 +101,7 @@ func TestUnifiedRender(t *testing.T) {
 		t.Fatalf("list --all failed: %v", err)
 	}
 	s := string(out)
-	for _, want := range []string{"[cc]", "[codex]", " alpha ", " beta "} {
+	for _, want := range []string{"[cc]", "[cb]", "[codex]", " alpha ", " beta "} {
 		if !strings.Contains(s, want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -331,11 +333,18 @@ func TestSortToggleAndSourceCycle(t *testing.T) {
 	r.send("\t") // → claude-code only
 	time.Sleep(200 * time.Millisecond)
 	r.waitFor(t, "source: claude-code", 3*time.Second)
+	r.send("\t") // → codebuddy only
+	time.Sleep(200 * time.Millisecond)
+	r.waitFor(t, "source: codebuddy", 3*time.Second)
 	r.send("\t") // → codex only
 	time.Sleep(200 * time.Millisecond)
 	r.waitFor(t, "source: codex", 3*time.Second)
-	r.send("\t") // → back to all
-	time.Sleep(300 * time.Millisecond)
+	// Continue through Kimi and OpenCode, then return to all sources.
+	for _, want := range []string{"kimi-code", "opencode", "all"} {
+		r.send("\t")
+		time.Sleep(150 * time.Millisecond)
+		r.waitFor(t, "source: "+want, 3*time.Second)
+	}
 
 	// Toggling must leave the picker functional and must not exec anything;
 	// exec behavior itself is covered by the dedicated tests above.
@@ -363,6 +372,27 @@ func TestCodexSelectExec(t *testing.T) {
 	log := waitForFile(t, logPath, 5*time.Second)
 	if !strings.Contains(log, "args=resume 019cccc3-3333-7000-8000-000000000003") {
 		t.Errorf("expected codex resume of most-recent session, log: %q", log)
+	}
+}
+
+// --- codebuddy selection end-to-end ---
+
+func TestCodeBuddySelectExec(t *testing.T) {
+	materializeFixtureCwds(t)
+	logPath := filepath.Join(t.TempDir(), "codebuddy-mock.log")
+	env := append(fixtureEnv(t), "CODEBUDDY_MOCK_LOG="+logPath)
+
+	r := startPicker(t, env, "--source=codebuddy", "--all")
+	r.waitFor(t, "[cb]", 5*time.Second)
+	r.send("\r")
+	r.waitExit(t, 5*time.Second)
+
+	log := waitForFile(t, logPath, 5*time.Second)
+	if !strings.Contains(log, "args=--resume cb111111-1111-4111-8111-111111111111") {
+		t.Errorf("expected CodeBuddy resume with session ID, log: %q", log)
+	}
+	if !strings.Contains(log, "pwd=/tmp/resumer-fixtures/codebuddy-alpha") {
+		t.Errorf("expected exec from the recorded project directory, log: %q", log)
 	}
 }
 

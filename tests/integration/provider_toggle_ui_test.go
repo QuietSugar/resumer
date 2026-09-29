@@ -21,8 +21,8 @@ func TestProviderToggleUI(t *testing.T) {
 	r.waitFor(t, "resumer providers", 5*time.Second)
 	r.waitFor(t, "[*] opencode", 5*time.Second)
 
-	// claude-code → codex → kimi-code → opencode: three downs, toggle, save.
-	r.send("\x1b[B\x1b[B\x1b[B")
+	// claude-code → codebuddy → codex → kimi-code → opencode: four downs, toggle, save.
+	r.send("\x1b[B\x1b[B\x1b[B\x1b[B")
 	r.send(" ")
 	r.waitFor(t, "[ ] opencode", 5*time.Second)
 	r.send("\r")
