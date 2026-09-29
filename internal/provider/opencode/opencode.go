@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,12 +127,22 @@ type promptAgg struct {
 	firstTS, lastTS int64
 	first, last     string
 	asst            int
+	seenP           map[string]bool // "ts\x00text" — dedupes dual-projected rows
+	seenA           map[int64]bool  // assistant turn timestamps
 }
 
 func (a *promptAgg) addPrompt(ts int64, text string) {
 	if text == "" {
 		return
 	}
+	key := strconv.FormatInt(ts, 10) + "\x00" + text
+	if a.seenP == nil {
+		a.seenP = map[string]bool{}
+	}
+	if a.seenP[key] {
+		return
+	}
+	a.seenP[key] = true
 	if a.first == "" || (a.firstTS != 0 && ts < a.firstTS) || a.firstTS == 0 {
 		if a.first == "" || ts < a.firstTS {
 			a.firstTS, a.first = ts, text
@@ -142,11 +153,26 @@ func (a *promptAgg) addPrompt(ts int64, text string) {
 	}
 }
 
-func (a *promptAgg) addAssistant() { a.asst++ }
+func (a *promptAgg) addAssistantAt(ts int64) {
+	if a.seenA == nil {
+		a.seenA = map[int64]bool{}
+	}
+	if a.seenA[ts] {
+		return
+	}
+	a.seenA[ts] = true
+	a.asst++
+}
 
-// indexSQLitePrompts walks the message-bearing tables of an opencode db.
-// Tolerates missing tables/shapes: message storage evolved across versions
-// (session_message in v2; message+part pairs in dbs migrated from 1.x).
+// indexSQLitePrompts walks the message-bearing tables of an opencode db and
+// merges both projections at the row level. Baseline 1.18.x keeps two parallel
+// projections of the same conversation: the durable pipeline writes
+// session_message, while the v1-compat layer keeps writing message+part — and
+// messages that predate an upgrade live only in the legacy pair (there is no
+// backfill migration). Prompts are therefore unioned across the two families
+// and deduped on (timestamp, text) for prompts and timestamp for assistant
+// turns; for the same logical message both projections store identical
+// values. Tolerates missing tables: pre-1.1 JSON-era installs have no db.
 func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 	out := map[string]*promptAgg{}
 	agg := func(id string) *promptAgg {
@@ -158,10 +184,8 @@ func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 		return a
 	}
 
-	// v2: session_message rows are the source of truth for the sessions they
-	// cover. Legacy message/part rows for the same session (left in place by
-	// the 1.x migration) would double-count, so they are merged in only for
-	// sessions the v2 table never mentions.
+	// Durable projection (1.1+ … 1.18.x, v2): envelope column `type` plus a
+	// JSON payload in `data`.
 	if tbl, err := db.Table("session_message"); err == nil {
 		_ = tbl.Scan(func(r sqliteread.Row) error {
 			ses, _ := r.Str("session_id")
@@ -182,17 +206,19 @@ func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 			case "user":
 				agg(ses).addPrompt(ts, strings.TrimSpace(payload.Text))
 			case "assistant":
-				agg(ses).addAssistant()
+				agg(ses).addAssistantAt(ts)
 			}
 			return nil
 		})
-		return out
 	}
 
-	// Legacy 1.x pair: message (role, no parts) + part (typed blocks).
+	// v1-compat projection: message (role envelope) + part (typed blocks).
+	// Legacy prompt timestamps come from message.time_created — part rows do
+	// not carry usable prompt times of their own.
 	type legacyMsg struct {
 		ses  string
 		role string
+		ts   int64
 	}
 	msgs := map[string]legacyMsg{}
 	if tbl, err := db.Table("message"); err == nil {
@@ -208,11 +234,13 @@ func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 			if raw, ok := r.Str("data"); ok && raw != "" {
 				_ = json.Unmarshal([]byte(raw), &payload)
 			}
-			if payload.Role == "user" || payload.Role == "assistant" {
-				msgs[id] = legacyMsg{ses: ses, role: payload.Role}
-				if payload.Role == "assistant" {
-					agg(ses).addAssistant()
-				}
+			if payload.Role != "user" && payload.Role != "assistant" {
+				return nil
+			}
+			ts, _ := r.Int("time_created")
+			msgs[id] = legacyMsg{ses: ses, role: payload.Role, ts: ts}
+			if payload.Role == "assistant" {
+				agg(ses).addAssistantAt(ts)
 			}
 			return nil
 		})
@@ -234,7 +262,7 @@ func indexSQLitePrompts(db *sqliteread.DB) map[string]*promptAgg {
 					_ = json.Unmarshal([]byte(raw), &payload)
 				}
 				if payload.Type == "text" && !payload.Synthetic {
-					agg(m.ses).addPrompt(0, strings.TrimSpace(payload.Text))
+					agg(m.ses).addPrompt(m.ts, strings.TrimSpace(payload.Text))
 				}
 				return nil
 			})
@@ -408,7 +436,7 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 						}
 					}
 				case "assistant":
-					pa.addAssistant()
+					pa.addAssistantAt(ts)
 					if t := msg.Metadata.Assistant.Tokens; t != nil {
 						tok.Input += int64(t.Input)
 						tok.Output += int64(t.Output)

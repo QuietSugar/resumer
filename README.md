@@ -53,6 +53,10 @@ Useful flags (both picker and `list`): `--days N`, `--date YYYY-MM-DD`, `--all`,
 | OpenCode | `~/.local/share/opencode/opencode.db` (≤1.0: `storage/session/`) | `opencode --session <id>` |
 | Gemini CLI | roadmap | |
 
+Verified against kimi-code **2.1.1** and opencode **1.18.33** sources; older
+releases are best-effort only (the opencode `storage/` JSON layout of ≤1.0 is
+kept as a fallback when no database exists).
+
 resumer also fixes a real-world annoyance: when a session's stored cwd has gone
 stale (iCloud/Obsidian path drift), it re-derives the correct project directory
 from the session file location, so `claude --resume` actually works.

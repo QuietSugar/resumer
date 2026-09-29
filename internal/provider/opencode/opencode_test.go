@@ -3,6 +3,7 @@ package opencode
 import (
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/jin-ttao/resumer/internal/session"
@@ -45,10 +46,10 @@ func listAll(t *testing.T) map[string]session.Session {
 
 func TestSQLiteParsing(t *testing.T) {
 	sessions := listAll(t)
-	// 4 sqlite rows: archived + child skipped; plus the JSON-only legacy
-	// session merged in → 3 total.
-	if len(sessions) != 3 {
-		t.Fatalf("expected 3 sessions (2 sqlite roots + 1 json), got %d: %v",
+	// 5 sqlite rows → archived + child skipped, 3 sqlite roots remain; the
+	// JSON-only legacy session merges in → 4 total.
+	if len(sessions) != 4 {
+		t.Fatalf("expected 4 sessions (3 sqlite roots + 1 json), got %d: %v",
 			len(sessions), sessions)
 	}
 
@@ -73,8 +74,11 @@ func TestSQLiteParsing(t *testing.T) {
 		one.LastPrompt != "opencode fixture one second prompt" {
 		t.Errorf("prompts = %q / %q", one.FirstPrompt, one.LastPrompt)
 	}
+	// ses_aaaa is dual-projected (session_message + legacy message/part hold
+	// the same two turns, as opencode 1.18.x writes both). The legacy copies
+	// must collapse into the durable ones: 2 turns, not 4.
 	if one.AsstCount != 2 {
-		t.Errorf("assistant count = %d, want 2", one.AsstCount)
+		t.Errorf("assistant count = %d, want 2 (dual-write dedupe failed)", one.AsstCount)
 	}
 	// epoch ms → RFC3339
 	if one.FirstTS != "2026-04-15T05:00:00Z" {
@@ -116,6 +120,36 @@ func TestLegacyMessagePartPairDoesNotLeakAssistantText(t *testing.T) {
 		one.FirstPrompt == "legacy part prompt that must not leak" {
 		t.Errorf("assistant part text leaked as prompt: %q / %q",
 			one.FirstPrompt, one.LastPrompt)
+	}
+}
+
+// Sessions that predate an upgrade exist only in the legacy message+part
+// pair — opencode ships no backfill migration for them, so the provider must
+// surface them from the v1 tables alone.
+func TestLegacyOnlySession(t *testing.T) {
+	sessions := listAll(t)
+	leg := sessions["ses_eeeeeeeeeeeeeeeeeeeeeeeeeeee"]
+	if leg.SessionID == "" {
+		t.Fatal("legacy-only session missing")
+	}
+	if leg.Title != "OpenCode Legacy Session" {
+		t.Errorf("title = %q", leg.Title)
+	}
+	if leg.Cwd != "/tmp/resumer-fixtures/oc-two" || leg.ProjectLabel != "oc-two" {
+		t.Errorf("cwd/project = %q / %q", leg.Cwd, leg.ProjectLabel)
+	}
+	if leg.FirstPrompt != "legacy only first prompt" ||
+		leg.LastPrompt != "legacy only second prompt" {
+		t.Errorf("prompts = %q / %q", leg.FirstPrompt, leg.LastPrompt)
+	}
+	if strings.Contains(leg.FirstPrompt+leg.LastPrompt, "synthetic legacy prompt") {
+		t.Error("synthetic part text leaked as prompt")
+	}
+	if leg.AsstCount != 1 {
+		t.Errorf("assistant count = %d, want 1", leg.AsstCount)
+	}
+	if leg.FirstTS != "2026-04-15T06:00:00Z" || leg.LastTS != "2026-04-15T06:05:00Z" {
+		t.Errorf("timestamps = %q .. %q", leg.FirstTS, leg.LastTS)
 	}
 }
 
@@ -179,8 +213,8 @@ func TestFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(on) != 3 {
-		t.Errorf("on-day filter returned %d, want 3", len(on))
+	if len(on) != 4 {
+		t.Errorf("on-day filter returned %d, want 4", len(on))
 	}
 	proj, err := p.ListSessions(session.Filters{AllTime: true, Days: -1, Project: "oc-three"})
 	if err != nil {
@@ -188,6 +222,14 @@ func TestFilters(t *testing.T) {
 	}
 	if len(proj) != 1 || proj[0].SessionID != "ses_dddddddddddddddddddddddddddd" {
 		t.Errorf("project filter = %+v", proj)
+	}
+	proj2, err := p.ListSessions(session.Filters{AllTime: true, Days: -1, Project: "oc-two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// oc-two matches the legacy-only session; the archived one is skipped.
+	if len(proj2) != 1 || proj2[0].SessionID != "ses_eeeeeeeeeeeeeeeeeeeeeeeeeeee" {
+		t.Errorf("project filter oc-two = %+v", proj2)
 	}
 	// default window (Days unset → 3-day cutoff) vs 2026-04-15 fixtures:
 	// today is far past, so nothing qualifies.
