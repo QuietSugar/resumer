@@ -17,6 +17,7 @@ const (
 	colLast    = 15
 	colBadge   = 7
 	colProject = 22
+	colTitle   = 30
 	colPrompt  = 78
 	colAux     = 40
 )
@@ -72,6 +73,7 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	}
 	badge := badgeStyle[s.Source].Render(textutil.PadDisplay(badgeText, colBadge))
 	proj := textutil.PadDisplay(textutil.TrimDisplay(s.ProjectLabel, colProject), colProject)
+	title := textutil.PadDisplay(textutil.TrimDisplay(s.Title, colTitle), colTitle)
 	marker := textutil.PadDisplay(textutil.VolumeMarker(s.AsstCount+len(s.Prompts)), 2)
 	var tokTotal int64
 	if s.Tokens != nil {
@@ -80,9 +82,7 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	tok := fmt.Sprintf("%9s", textutil.FmtTokens(tokTotal))
 	first := textutil.PadDisplay(textutil.TrimDisplay(s.FirstPrompt, colPrompt), colPrompt)
 	aux := ""
-	if s.Title != "" {
-		aux = textutil.TrimDisplay(s.Title, colAux)
-	} else if s.Subtitle != "" {
+	if s.Subtitle != "" {
 		aux = textutil.TrimDisplay(s.Subtitle, colAux)
 	}
 
@@ -98,8 +98,8 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	if aux != "" {
 		label += "  " + dimStyle.Render(aux)
 	}
-	row := fmt.Sprintf("%s%s %s %s %s %s  %s",
-		cursor, dimStyle.Render(last), badge, rowStyle.Render(proj), marker, dimStyle.Render(tok), label)
+	row := fmt.Sprintf("%s%s %s %s %s %s %s %s",
+		cursor, dimStyle.Render(last), badge, rowStyle.Render(proj), dimStyle.Render(title), marker, dimStyle.Render(tok), label)
 
 	// Clip to the list's width so long rows never wrap and break the layout.
 	fmt.Fprint(w, lipgloss.NewStyle().MaxWidth(m.Width()).Render(row))

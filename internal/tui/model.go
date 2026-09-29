@@ -21,7 +21,7 @@ import (
 	"github.com/jin-ttao/resumer/internal/session"
 )
 
-const helpLine = "↑↓ browse · / filter · tab source · ctrl-s sort · enter resume · esc cancel"
+const helpLine = "↑↓ browse · / filter · tab source · ctrl-s sort · ctrl-r rescan · enter resume · esc cancel"
 
 var (
 	headerStyle  = lipgloss.NewStyle().Bold(true)
@@ -33,9 +33,10 @@ var (
 )
 
 type loadedMsg struct {
-	name     string
-	sessions []session.Session
-	err      error
+	generation int
+	name       string
+	sessions   []session.Session
+	err        error
 }
 
 // Model is the picker's bubbletea model. Exported for teatest.
@@ -47,12 +48,14 @@ type Model struct {
 	preview viewport.Model
 	spin    spinner.Model
 
-	all       []session.Session
-	sources   []string // "" = all, else provider name
-	sourceIdx int
-	sortAsc   bool
-	pending   int
-	warnings  []string
+	all        []session.Session
+	sources    []string // "" = all, else provider name
+	sourceIdx  int
+	sortAsc    bool
+	pending    int
+	generation int
+	loaded     bool
+	warnings   []string
 
 	selected   *session.Session
 	noSessions bool
@@ -96,16 +99,21 @@ func (m Model) Selected() *session.Session { return m.selected }
 // NoSessions reports whether loading finished with zero sessions.
 func (m Model) NoSessions() bool { return m.noSessions }
 
-func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spin.Tick}
+func (m Model) scanCmds() []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.providers))
 	for _, p := range m.providers {
 		p := p
-		f := m.filters
+		f, generation := m.filters, m.generation
 		cmds = append(cmds, func() tea.Msg {
 			ss, err := p.ListSessions(f)
-			return loadedMsg{name: p.Name(), sessions: ss, err: err}
+			return loadedMsg{generation: generation, name: p.Name(), sessions: ss, err: err}
 		})
 	}
+	return cmds
+}
+
+func (m Model) Init() tea.Cmd {
+	cmds := append([]tea.Cmd{m.spin.Tick}, m.scanCmds()...)
 	return tea.Batch(cmds...)
 }
 
@@ -122,13 +130,26 @@ func (m *Model) currentSessions() []session.Session {
 }
 
 func (m *Model) applyItems() {
+	selectedID, selectedSource := "", ""
+	if selected, ok := m.list.SelectedItem().(sessionItem); ok {
+		selectedID, selectedSource = selected.s.SessionID, selected.s.Source
+	}
+
 	sessions := m.currentSessions()
 	items := make([]list.Item, len(sessions))
 	for i, s := range sessions {
 		items[i] = sessionItem{s: s}
 	}
 	m.list.SetItems(items)
-	if m.list.Index() >= len(items) {
+	selected := false
+	for i, s := range sessions {
+		if s.SessionID == selectedID && s.Source == selectedSource {
+			m.list.Select(i)
+			selected = true
+			break
+		}
+	}
+	if !selected && len(items) > 0 {
 		m.list.Select(0)
 	}
 	m.refreshPreview()
@@ -179,19 +200,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case loadedMsg:
-		m.pending--
+		if msg.generation != m.generation {
+			return m, nil
+		}
+		if m.pending > 0 {
+			m.pending--
+		}
 		if msg.err != nil {
 			m.warnings = append(m.warnings,
 				fmt.Sprintf("warning: %s provider failed: %v", msg.name, msg.err))
 			m.resize()
-		}
-		if len(msg.sessions) > 0 {
-			m.all = append(m.all, msg.sessions...)
+		} else {
+			kept := m.all[:0]
+			for _, existing := range m.all {
+				if existing.Source != msg.name {
+					kept = append(kept, existing)
+				}
+			}
+			m.all = append(kept, msg.sessions...)
 			m.applyItems()
 		}
-		if m.pending == 0 && len(m.all) == 0 {
-			m.noSessions = true
-			return m, tea.Quit
+		if m.pending == 0 {
+			firstLoad := !m.loaded
+			m.loaded = true
+			if firstLoad && len(m.all) == 0 {
+				m.noSessions = true
+				return m, tea.Quit
+			}
 		}
 		return m, nil
 
@@ -204,6 +239,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+r" {
+			m.generation++
+			m.pending = len(m.providers)
+			m.warnings = nil
+			m.resize()
+			cmds := append([]tea.Cmd{m.spin.Tick}, m.scanCmds()...)
+			return m, tea.Batch(cmds...)
+		}
 		// While the user is typing a filter, the list owns the keyboard.
 		if m.list.FilterState() == list.Filtering {
 			break
