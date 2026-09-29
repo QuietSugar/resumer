@@ -112,7 +112,7 @@ func FullBox(s *session.Session) string {
 	add("│ last activity:  %s", textutil.FmtTS(s.LastTS, true))
 	add("│ duration:       %s", textutil.FmtDuration(s.FirstTS, s.LastTS))
 	add("│ cwd:            %s", cwd)
-	add("│ prompts:        %d user / %d assistant", len(s.Prompts), s.AsstCount)
+	add("│ activity:       %d user prompts / ~%d assistant activity", len(s.Prompts), s.AsstCount)
 	if s.Title != "" {
 		add("│ title:          %s", s.Title)
 	}

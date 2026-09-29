@@ -15,19 +15,21 @@ type jsonPrompt struct {
 }
 
 type jsonSession struct {
-	Source      string       `json:"source"`
-	SessionID   string       `json:"session_id"`
-	Path        string       `json:"path"`
-	Cwd         *string      `json:"cwd"`
-	FirstTS     *string      `json:"first_ts"`
-	LastTS      *string      `json:"last_ts"`
-	Title       *string      `json:"title"`
-	Subtitle    *string      `json:"subtitle"`
-	FirstPrompt *string      `json:"first_prompt"`
-	LastPrompt  *string      `json:"last_prompt"`
-	AsstCount   int          `json:"asst_count"`
-	Prompts     []jsonPrompt `json:"prompts"`
-	ResumeArgv  []string     `json:"resume_argv"`
+	Source      string  `json:"source"`
+	SessionID   string  `json:"session_id"`
+	Path        string  `json:"path"`
+	Cwd         *string `json:"cwd"`
+	FirstTS     *string `json:"first_ts"`
+	LastTS      *string `json:"last_ts"`
+	Title       *string `json:"title"`
+	Subtitle    *string `json:"subtitle"`
+	FirstPrompt *string `json:"first_prompt"`
+	LastPrompt  *string `json:"last_prompt"`
+	// AsstCount is a provider-specific rough activity estimate, not an exact
+	// assistant-turn count; see session.Session.AsstCount.
+	AsstCount  int          `json:"asst_count"`
+	Prompts    []jsonPrompt `json:"prompts"`
+	ResumeArgv []string     `json:"resume_argv"`
 }
 
 func nullable(s string) *string {

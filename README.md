@@ -35,7 +35,9 @@ Picker keys: `↑↓` browse · `/` filter · `tab` cycle source · `ctrl-s` tog
 
 Useful flags (both picker and `list`): `--days N`, `--date YYYY-MM-DD`, `--all`,
 `--project foo`, `--source claude-code|codebuddy|codex|kimi-code|opencode`, `--limit N`. List mode adds
-`--json` and `--full [N]`.
+`--json` and `--full [N]`. The `asst_count` JSON field and detail-preview
+assistant activity figure are provider-specific rough size estimates; counting
+rules differ and the values are not exact or directly comparable across providers.
 
 ## Enabling / disabling providers
 

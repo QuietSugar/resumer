@@ -23,8 +23,12 @@ type Session struct {
 	FirstPrompt  string
 	LastPrompt   string
 	Prompts      []Prompt
-	AsstCount    int
-	ResumeArgv   []string
+	// AsstCount is a provider-defined estimate of assistant-side activity.
+	// Providers may use different counting rules; the value can be inaccurate
+	// and is intended only as a rough indication of conversation size, not an
+	// exact or cross-provider comparable turn count.
+	AsstCount  int
+	ResumeArgv []string
 }
 
 // Filters mirrors the CLI surface. Days < 0 means "unset" (provider default).
