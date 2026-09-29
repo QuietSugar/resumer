@@ -25,6 +25,7 @@ var (
 	badgeStyle = map[string]lipgloss.Style{
 		"claude-code": lipgloss.NewStyle().Foreground(lipgloss.Color("2")), // green
 		"codex":       lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
+		"kimi-code":   lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
 	}
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
@@ -61,6 +62,9 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	badgeText := "[" + s.Source + "]"
 	if s.Source == "claude-code" {
 		badgeText = "[cc]"
+	}
+	if s.Source == "kimi-code" {
+		badgeText = "[kimi]"
 	}
 	badge := badgeStyle[s.Source].Render(textutil.PadDisplay(badgeText, colBadge))
 	proj := textutil.PadDisplay(textutil.TrimDisplay(s.ProjectLabel, colProject), colProject)

@@ -14,6 +14,7 @@ import (
 	"github.com/jin-ttao/resumer/internal/provider"
 	"github.com/jin-ttao/resumer/internal/provider/claudecode"
 	"github.com/jin-ttao/resumer/internal/provider/codex"
+	"github.com/jin-ttao/resumer/internal/provider/kimi"
 	"github.com/jin-ttao/resumer/internal/render"
 	"github.com/jin-ttao/resumer/internal/session"
 	"github.com/jin-ttao/resumer/internal/tui"
@@ -23,6 +24,7 @@ func registerProviders() {
 	if len(provider.All()) == 0 {
 		provider.Register(claudecode.New())
 		provider.Register(codex.New())
+		provider.Register(kimi.New())
 	}
 }
 
@@ -34,7 +36,7 @@ Unified AI CLI session resumer.
   resumer list         render merged session list (no interaction)
 
 options:
-  --source NAME    limit to a single provider (claude-code | codex)
+  --source NAME    limit to a single provider (claude-code | codex | kimi-code)
   --days N         only show sessions active in the last N days (default: 7)
   --date DATE      YYYY-MM-DD — only sessions active on this date
   --all            no time filter
@@ -113,9 +115,9 @@ func Run(argv []string, version string) int {
 		fmt.Printf("resumer %s\n", version)
 		return 0
 	}
-	if *source != "" && *source != "claude-code" && *source != "codex" {
+	if *source != "" && *source != "claude-code" && *source != "codex" && *source != "kimi-code" {
 		fmt.Fprintf(os.Stderr,
-			"error: argument --source: invalid choice: %q (choose from claude-code, codex)\n", *source)
+			"error: argument --source: invalid choice: %q (choose from claude-code, codex, kimi-code)\n", *source)
 		return 2
 	}
 
@@ -137,7 +139,7 @@ func Run(argv []string, version string) int {
 	if *source == "" && len(provider.AvailableSourceNames()) == 0 {
 		fmt.Fprintln(os.Stderr,
 			"error: no session providers available. "+
-				"Install claude-code or codex and ensure their session directories exist.")
+				"Install claude-code, codex, or kimi and ensure their session directories exist.")
 		return 2
 	}
 
@@ -232,6 +234,7 @@ func execResume(s *session.Session) int {
 		installHint := map[string]string{
 			"claude": "https://docs.anthropic.com/en/docs/claude-code/quickstart",
 			"codex":  "https://github.com/openai/codex",
+			"kimi":   "https://github.com/MoonshotAI/kimi-code",
 		}[binName]
 		fmt.Fprintf(os.Stderr, "error: '%s' not found in PATH\n", binName)
 		if installHint != "" {

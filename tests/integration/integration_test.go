@@ -57,6 +57,8 @@ func fixtureEnv(t *testing.T) []string {
 		"RESUMER_CODEX_SESSION_ROOT=" + filepath.Join(repoRoot, "tests", "fixtures", "codex"),
 		"RESUMER_CODEX_INDEX_FILE=" + filepath.Join(repoRoot, "tests", "fixtures", "codex", "session_index.jsonl"),
 		"RESUMER_CODEX_BIN=codex",
+		"RESUMER_KIMI_HOME=" + filepath.Join(repoRoot, "tests", "fixtures", "kimi-home"),
+		"RESUMER_KIMI_BIN=kimi",
 		// Sentinel pre-burned via XDG redirect so the first-run star message
 		// doesn't interleave with exec assertions.
 		"XDG_STATE_HOME=" + t.TempDir(),
@@ -72,6 +74,8 @@ func materializeFixtureCwds(t *testing.T) {
 		"/tmp/resumer-fixtures/alpha",
 		"/tmp/resumer-fixtures/beta",
 		"/tmp/resumer-fixtures/obsidian path with space/vault",
+		"/tmp/resumer-fixtures/kimi-one",
+		"/tmp/resumer-fixtures/kimi-two",
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
@@ -353,5 +357,29 @@ func TestCodexSelectExec(t *testing.T) {
 	log := waitForFile(t, logPath, 5*time.Second)
 	if !strings.Contains(log, "args=resume 019cccc3-3333-7000-8000-000000000003") {
 		t.Errorf("expected codex resume of most-recent session, log: %q", log)
+	}
+}
+
+// --- kimi-code selection end-to-end ---
+
+func TestKimiSelectExec(t *testing.T) {
+	materializeFixtureCwds(t)
+	logPath := filepath.Join(t.TempDir(), "kimi-mock.log")
+	env := append(fixtureEnv(t), "KIMI_MOCK_LOG="+logPath)
+
+	r := startPicker(t, env, "--source=kimi-code", "--all")
+	r.waitFor(t, "[kimi]", 5*time.Second)
+	// Top row is the most recent kimi session (kimi-two, 06:32). Select it;
+	// exec must chdir into the workDir recorded in session_index.jsonl.
+	r.send("\r")
+	r.waitExit(t, 5*time.Second)
+
+	log := waitForFile(t, logPath, 5*time.Second)
+	if !strings.Contains(log, "args=--session dddd0002-2222-7000-8000-000000000002") {
+		t.Errorf("expected kimi --session of most-recent session, log: %q", log)
+	}
+	pwdRE := regexp.MustCompile(`pwd=(/private)?/tmp/resumer-fixtures/kimi-two`)
+	if !pwdRE.MatchString(log) {
+		t.Errorf("expected exec from the session workDir, log: %q", log)
 	}
 }

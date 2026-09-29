@@ -40,7 +40,7 @@ Picker keys: `↑↓` browse · `/` filter · `tab` cycle source · `ctrl-s` tog
 `enter` resume · `esc` cancel.
 
 Useful flags (both picker and `list`): `--days N`, `--date YYYY-MM-DD`, `--all`,
-`--project foo`, `--source claude-code|codex`, `--limit N`. List mode adds
+`--project foo`, `--source claude-code|codex|kimi-code`, `--limit N`. List mode adds
 `--json` and `--full [N]`.
 
 ## Providers
@@ -49,6 +49,7 @@ Useful flags (both picker and `list`): `--days N`, `--date YYYY-MM-DD`, `--all`,
 |---|---|---|
 | Claude Code | `~/.claude/projects/**/*.jsonl` | `claude --resume <id>` |
 | Codex CLI | `~/.codex/sessions/**/rollout-*.jsonl` | `codex resume <id>` |
+| Kimi Code CLI | `~/.kimi-code/sessions/<workDirKey>/<id>/` | `kimi --session <id>` |
 | Gemini CLI | roadmap | |
 
 resumer also fixes a real-world annoyance: when a session's stored cwd has gone
