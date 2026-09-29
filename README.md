@@ -37,6 +37,23 @@ Useful flags (both picker and `list`): `--days N`, `--date YYYY-MM-DD`, `--all`,
 `--project foo`, `--source claude-code|codex|kimi-code|opencode`, `--limit N`. List mode adds
 `--json` and `--full [N]`.
 
+## Enabling / disabling providers
+
+Each provider can be turned off; a disabled provider is **not scanned or
+parsed at all** — no storage walk, no file/db reads — until turned back on.
+
+```bash
+resumer provider list        # name, on/off state, storage detected?
+resumer provider off opencode
+resumer provider on opencode
+```
+
+The state persists in `~/.config/resumer/config.json` (`$RESUMER_CONFIG`
+overrides the path; `$XDG_CONFIG_HOME` overrides its directory). Disabled
+providers disappear from ambient scans and the picker's `tab` source cycle.
+An explicit `resumer list --source opencode` still works on a disabled
+provider — the flag is a deliberate per-invocation request.
+
 ## Providers
 
 | Provider | Session source | Resume command |

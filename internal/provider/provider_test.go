@@ -74,3 +74,79 @@ func TestSortSessionsStrictWeakOrderingOnTies(t *testing.T) {
 		t.Errorf("descending tiebreak should order by path asc, got %v", ids(tie))
 	}
 }
+
+// stubProvider exists only to exercise registry filtering.
+type stubProvider struct {
+	name  string
+	avail bool
+}
+
+func (s stubProvider) Name() string      { return s.name }
+func (s stubProvider) Badge() string     { return "[" + s.name + "]" }
+func (s stubProvider) BadgeANSI() string { return "" }
+func (s stubProvider) IsAvailable() bool { return s.avail }
+func (s stubProvider) ListSessions(f session.Filters) ([]session.Session, error) {
+	return nil, nil
+}
+func (s stubProvider) LoadDetail(id string) (*session.Session, error) { return nil, nil }
+
+// isolateRegistry snapshots the package-global registry and disabled set and
+// restores both after the test (registry state leaks across tests otherwise).
+func isolateRegistry(t *testing.T, ps ...stubProvider) {
+	t.Helper()
+	prevReg, prevDis := registry, disabled
+	registry = nil
+	disabled = map[string]bool{}
+	for _, p := range ps {
+		Register(p)
+	}
+	t.Cleanup(func() {
+		registry, disabled = prevReg, prevDis
+	})
+}
+
+func TestActiveFiltersDisabledProviders(t *testing.T) {
+	isolateRegistry(t,
+		stubProvider{"alpha", true},
+		stubProvider{"beta", true},
+		stubProvider{"gamma", false}, // installed in config but storage missing
+	)
+
+	got := names(Active())
+	if len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
+		t.Fatalf("Active with nothing disabled = %v", got)
+	}
+
+	SetDisabled([]string{"beta", "ghost"}) // ghost must be tolerated
+	if IsEnabled("beta") || IsEnabled("ghost") || !IsEnabled("alpha") {
+		t.Fatalf("IsEnabled wrong after SetDisabled")
+	}
+	if dn := DisabledNames(); len(dn) != 2 || dn[0] != "beta" || dn[1] != "ghost" {
+		t.Fatalf("DisabledNames = %v", dn)
+	}
+
+	got = names(Active())
+	if len(got) != 1 || got[0] != "alpha" {
+		t.Fatalf("Active after disable = %v, want [alpha]", got)
+	}
+	got = AvailableSourceNames()
+	if len(got) != 1 || got[0] != "alpha" {
+		t.Fatalf("AvailableSourceNames after disable = %v", got)
+	}
+	// All() still reports everything — `provider list` needs the full set.
+	if len(All()) != 3 {
+		t.Fatalf("All() = %d providers, want 3", len(All()))
+	}
+	// Get() ignores the disabled set: explicit --source lookups rely on it.
+	if Get("beta") == nil {
+		t.Fatal("Get(beta) must still resolve for explicit --source")
+	}
+}
+
+func names(ps []Provider) []string {
+	var out []string
+	for _, p := range ps {
+		out = append(out, p.Name())
+	}
+	return out
+}

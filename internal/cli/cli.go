@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 
+	"github.com/jin-ttao/resumer/internal/config"
 	"github.com/jin-ttao/resumer/internal/execres"
 	"github.com/jin-ttao/resumer/internal/provider"
 	"github.com/jin-ttao/resumer/internal/provider/claudecode"
@@ -31,11 +33,14 @@ func registerProviders() {
 }
 
 const usageText = `usage: resumer [list] [options]
+       resumer provider [list | on NAME | off NAME]
 
 Unified AI CLI session resumer.
 
   resumer              interactive picker across all active providers
   resumer list         render merged session list (no interaction)
+  resumer provider     manage providers; a disabled provider is not scanned
+                       or parsed at all until turned back on
 
 options:
   --source NAME    limit to a single provider (claude-code | codex | kimi-code | opencode)
@@ -47,6 +52,11 @@ options:
   --json           list mode only: emit JSON array of sessions
   --full [N]       list mode only: render detailed boxes for top N (default 5)
   --version        print version
+
+Disabled providers are recorded in ~/.config/resumer/config.json (override
+with $RESUMER_CONFIG) and are skipped by ambient scans. An explicit
+--source NAME still works on a disabled provider: the flag is a deliberate
+per-invocation request.
 `
 
 // valueFlags take a separate argument (so "list" after them is a value, not
@@ -56,8 +66,8 @@ var valueFlags = map[string]bool{
 	"--project": true, "--limit": true,
 }
 
-// normalize extracts the optional "list" subcommand and rewrites the
-// argparse-style "--full [N]" into flag-friendly "--full=N".
+// normalize extracts the optional subcommand ("list" or "provider") and
+// rewrites the argparse-style "--full [N]" into flag-friendly "--full=N".
 func normalize(argv []string) (command string, out []string) {
 	expectValue := false
 	for i := 0; i < len(argv); i++ {
@@ -66,8 +76,8 @@ func normalize(argv []string) (command string, out []string) {
 		case expectValue:
 			expectValue = false
 			out = append(out, tok)
-		case tok == "list" && command == "":
-			command = "list"
+		case command == "" && (tok == "list" || tok == "provider"):
+			command = tok
 		case tok == "--full":
 			n := 5
 			if i+1 < len(argv) {
@@ -92,6 +102,21 @@ func Run(argv []string, version string) int {
 	registerProviders()
 
 	command, args := normalize(argv)
+
+	// The provider subcommand has its own mini-parsing (positional args, no
+	// flags) and its own config-error policy: mutating commands must not
+	// silently proceed on an unreadable config, or Save would clobber it.
+	if command == "provider" {
+		return runProviderCmd(args)
+	}
+
+	// Every other path only reads the config: degrade to defaults with a
+	// warning instead of failing the whole invocation.
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: ignoring unreadable config: %v\n", err)
+	}
+	provider.SetDisabled(cfg.Disabled)
 
 	fs := flag.NewFlagSet("resumer", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usageText) }
@@ -138,11 +163,18 @@ func Run(argv []string, version string) int {
 
 	// Global availability check only when no specific source requested;
 	// otherwise MergedList returns a source-specific error with better
-	// diagnostics.
+	// diagnostics. A disabled provider counts as "handled": point the user
+	// at `provider on` rather than claiming nothing is installed.
 	if *source == "" && len(provider.AvailableSourceNames()) == 0 {
-		fmt.Fprintln(os.Stderr,
-			"error: no session providers available. "+
-				"Install claude-code, codex, kimi, or opencode and ensure their session storage exists.")
+		msg := "error: no session providers available. " +
+			"Install claude-code, codex, kimi, or opencode and ensure their session storage exists."
+		if dis := provider.DisabledNames(); len(dis) > 0 {
+			msg = fmt.Sprintf(
+				"error: no enabled session providers available (disabled: %s). "+
+					"Run `resumer provider on <name>` to re-enable one.",
+				strings.Join(dis, ", "))
+		}
+		fmt.Fprintln(os.Stderr, msg)
 		return 2
 	}
 
@@ -195,6 +227,87 @@ func runPicker(filters session.Filters) int {
 		return 0
 	}
 	return execResume(chosen)
+}
+
+// runProviderCmd implements `resumer provider [list | on NAME | off NAME]`.
+// State is persisted to the config file; unknown subcommands exit 2.
+func runProviderCmd(args []string) int {
+	sub := "list"
+	if len(args) > 0 {
+		sub = args[0]
+		args = args[1:]
+	}
+
+	switch sub {
+	case "list", "":
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 2
+		}
+		fmt.Printf("%-12s %-5s %-10s %s\n", "PROVIDER", "STATE", "STORAGE", "CONFIG")
+		for _, p := range provider.All() {
+			state, storage := "on", "ok"
+			cfgNote := "-"
+			if !p.IsAvailable() {
+				storage = "missing"
+			}
+			if cfg.IsDisabled(p.Name()) {
+				state = "off"
+				cfgNote = "disabled"
+			}
+			fmt.Printf("%-12s %-5s %-10s %s\n", p.Name(), state, storage, cfgNote)
+		}
+		return 0
+
+	case "on", "off":
+		if len(args) == 0 {
+			fmt.Fprintf(os.Stderr, "error: provider %s requires a name (choose from %s)\n",
+				sub, strings.Join(providerNames(), ", "))
+			return 2
+		}
+		name := args[0]
+		if provider.Get(name) == nil {
+			fmt.Fprintf(os.Stderr, "error: unknown provider: %q (choose from %s)\n",
+				name, strings.Join(providerNames(), ", "))
+			return 2
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: refusing to rewrite unreadable config: %v\n", err)
+			return 2
+		}
+		if sub == "off" {
+			cfg.Disable(name)
+			if err := config.Save(cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "error: saving config: %v\n", err)
+				return 2
+			}
+			fmt.Printf("%s disabled — resumer will no longer scan or parse it.\n", name)
+		} else {
+			cfg.Enable(name)
+			if err := config.Save(cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "error: saving config: %v\n", err)
+				return 2
+			}
+			fmt.Printf("%s enabled.\n", name)
+		}
+		return 0
+
+	default:
+		fmt.Fprintf(os.Stderr,
+			"error: unknown provider subcommand: %q (choose from list, on, off)\n", sub)
+		return 2
+	}
+}
+
+// providerNames lists registered provider names in registry order.
+func providerNames() []string {
+	var out []string
+	for _, p := range provider.All() {
+		out = append(out, p.Name())
+	}
+	return out
 }
 
 // execResume chdirs into the session's directory and replaces the process
