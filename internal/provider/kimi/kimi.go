@@ -45,6 +45,12 @@ const (
 	maxLineBytes = 10 << 20
 )
 
+// Wire/state timestamp conventions (verified against kimi-code source,
+// packages/agent-core-v2): SessionMeta.createdAt/updatedAt are epoch
+// MILLISECONDS numbers; wire records carry `time` (epoch ms) while the
+// metadata record uses `created_at`. ISO-8601 strings are accepted too for
+// forward/backward compatibility.
+
 // kimiHome mirrors Kimi Code's KIMI_CODE_HOME data root, with a resumer-level
 // override for test harnesses.
 func kimiHome() string {
@@ -140,11 +146,25 @@ type messageBody struct {
 }
 
 type wireRecord struct {
+	// Time is the epoch-ms number written by every event (ExternalEvent.time).
+	Time json.Number `json:"time"`
+	// Timestamp accepts ISO strings for forward compatibility.
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
 	Role      string          `json:"role"`
 	Message   json.RawMessage `json:"message"`
 	Content   json.RawMessage `json:"content"`
+}
+
+// recordTS resolves a record's timestamp: epoch-ms `time` first (the real
+// kimi-code convention), then ISO `timestamp`.
+func recordTS(r wireRecord) string {
+	if r.Time != "" {
+		if ts := normalizeTS(r.Time.String()); ts != "" {
+			return ts
+		}
+	}
+	return normalizeTS(r.Timestamp)
 }
 
 // extractText decodes content that is either a plain string or a list of
@@ -180,6 +200,8 @@ func isRealPrompt(txt string) bool {
 // normalizeTS passes ISO timestamps through untouched (the session struct and
 // renderers expect RFC3339-ish strings) and converts bare epoch values —
 // seconds or milliseconds — to UTC RFC3339 so sorting/rendering still work.
+// Epochs shorter than 10 digits (pre-2001) are rejected so bogus 0 values
+// can't poison lastTS.
 func normalizeTS(ts string) string {
 	if ts == "" {
 		return ""
@@ -188,6 +210,9 @@ func normalizeTS(ts string) string {
 		return ts
 	}
 	if digitsOnly(ts) {
+		if len(ts) < 10 {
+			return ""
+		}
 		n, err := strconv.ParseInt(ts, 10, 64)
 		if err != nil {
 			return ""
@@ -256,16 +281,27 @@ func earlierTS(a, b string) string {
 }
 
 type stateMeta struct {
-	Title      string `json:"title"`
-	LastPrompt string `json:"lastPrompt"`
-	CreatedAt  string `json:"createdAt"`
-	UpdatedAt  string `json:"updatedAt"`
-	CreatedAlt string `json:"created_at"`
-	UpdatedAlt string `json:"updated_at"`
-	ForkedFrom string `json:"forkedFrom"`
-	ForkedAlt  string `json:"forked_from"`
-	Cwd        string `json:"cwd"`
-	WorkDir    string `json:"workDir"`
+	Title      string      `json:"title"`
+	LastPrompt string      `json:"lastPrompt"`
+	CreatedAt  json.Number `json:"createdAt"` // epoch ms (real kimi-code form)
+	UpdatedAt  json.Number `json:"updatedAt"`
+	CreatedAlt string      `json:"created_at"` // ISO fallback form
+	UpdatedAlt string      `json:"updated_at"`
+	ForkedFrom string      `json:"forkedFrom"`
+	ForkedAlt  string      `json:"forked_from"`
+	Cwd        string      `json:"cwd"`
+	WorkDir    string      `json:"workDir"`
+}
+
+// metaTS resolves state.json timestamps: epoch-ms number first, then ISO
+// string fallback.
+func metaTS(n json.Number, iso string) string {
+	if n != "" {
+		if ts := normalizeTS(n.String()); ts != "" {
+			return ts
+		}
+	}
+	return normalizeTS(iso)
 }
 
 // parseSessionDir reads one session directory (state.json + main wire.jsonl).
@@ -281,14 +317,8 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 	var state stateMeta
 	_ = json.Unmarshal(stateData, &state)
 
-	createdAt := normalizeTS(state.CreatedAt)
-	if createdAt == "" {
-		createdAt = normalizeTS(state.CreatedAlt)
-	}
-	updatedAt := normalizeTS(state.UpdatedAt)
-	if updatedAt == "" {
-		updatedAt = normalizeTS(state.UpdatedAlt)
-	}
+	createdAt := metaTS(state.CreatedAt, state.CreatedAlt)
+	updatedAt := metaTS(state.UpdatedAt, state.UpdatedAlt)
 	forkedFrom := state.ForkedFrom
 	if forkedFrom == "" {
 		forkedFrom = state.ForkedAlt
@@ -307,7 +337,7 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 			if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
 				continue
 			}
-			if ts := normalizeTS(r.Timestamp); ts != "" {
+			if ts := recordTS(r); ts != "" {
 				firstTS = earlierTS(firstTS, ts)
 				lastTS = laterTS(lastTS, ts)
 			}
@@ -324,6 +354,9 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 					}
 				}
 			}
+			// Real kimi-code records are flattened events:
+			// {type:"agent.message.appended", message:{role,content}, time}.
+			// The user_message branch is defensive for older/other shapes.
 			if r.Type == "user_message" && role == "" {
 				role = "user"
 			}
@@ -331,7 +364,7 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 			case "user":
 				if txt := extractText(content); isRealPrompt(txt) {
 					prompts = append(prompts, session.Prompt{
-						TS:   normalizeTS(r.Timestamp),
+						TS:   recordTS(r),
 						Text: strings.TrimSpace(txt),
 					})
 				}

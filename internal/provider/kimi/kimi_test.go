@@ -63,13 +63,17 @@ func TestFixtureParsing(t *testing.T) {
 	if one.AsstCount != 2 {
 		t.Errorf("assistant count = %d, want 2", one.AsstCount)
 	}
-	// FirstTS takes the earlier of createdAt and the first wire timestamp;
-	// LastTS the later of updatedAt and the last wire timestamp.
-	if one.FirstTS != "2026-04-15T05:30:00.000Z" {
+	// FirstTS takes the earlier of createdAt (epoch ms in state.json) and the
+	// first wire timestamp; LastTS the later of updatedAt and the last wire
+	// timestamp (incl. turn.ended). Epoch-normalized values have no millis.
+	if one.FirstTS != "2026-04-15T05:30:00Z" {
 		t.Errorf("first ts = %q", one.FirstTS)
 	}
-	if one.LastTS != "2026-04-15T05:31:30.000Z" {
+	if one.LastTS != "2026-04-15T05:31:31Z" {
 		t.Errorf("last ts = %q", one.LastTS)
+	}
+	if len(one.Prompts) > 0 && one.Prompts[0].TS != "2026-04-15T05:30:05Z" {
+		t.Errorf("prompt ts = %q", one.Prompts[0].TS)
 	}
 	if one.Tokens != nil {
 		t.Error("kimi sessions carry no token usage yet")
@@ -220,6 +224,8 @@ func TestNormalizeTS(t *testing.T) {
 		"2026-04-15 05:30:00":      "2026-04-15 05:30:00",
 		"1776231000":               "2026-04-15T05:30:00Z", // epoch seconds
 		"1776231000000":            "2026-04-15T05:30:00Z", // epoch millis
+		"0":                        "",                     // bogus zero rejected
+		"12345678":                 "",                     // pre-2001 epoch rejected
 		"garbage":                  "",
 	}
 	for in, want := range cases {
