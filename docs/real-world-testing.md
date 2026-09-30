@@ -10,12 +10,13 @@ The picker uses this estimate only as part of a coarse conversation-volume marke
 
 ## 1. Build the current branch
 
-The provider changes are on `arena/01a0ec69-resumer`. Clone it into a separate directory, or use an existing checkout of that branch:
+Clone the repository and check out what you want to test (`main` tracks the
+latest release):
 
 ```bash
-git clone --single-branch --branch arena/01a0ec69-resumer \
-  https://github.com/QuietSugar/resumer.git resumer-real-test
+git clone https://github.com/QuietSugar/resumer.git resumer-real-test
 cd resumer-real-test
+git checkout main
 
 go test ./...
 go build -o ./resumer .
