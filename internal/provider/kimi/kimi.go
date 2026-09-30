@@ -407,6 +407,10 @@ type stateMeta struct {
 	ForkedAlt  string      `json:"forked_from"`
 	Cwd        string      `json:"cwd"`
 	WorkDir    string      `json:"workDir"`
+	// Archived marks a session kimi has put away. kimi keeps the directory
+	// and its wire stream on disk but leaves archived sessions out of its
+	// own session picker, so resumer must not offer them either.
+	Archived bool `json:"archived"`
 }
 
 // metaTS resolves state.json timestamps: epoch-ms number first, then ISO
@@ -421,8 +425,9 @@ func metaTS(n json.Number, iso string) string {
 }
 
 // parseSessionDir reads one session directory (state.json + main wire.jsonl).
-// Returns nil when state.json is missing/unreadable — a directory without it
-// is not a session.
+// Returns nil when the directory is not a listable session: state.json is
+// missing/unreadable (a directory without it is not a session), or state.json
+// marks the session archived.
 func (p *Provider) parseSessionDir(dir string) *session.Session {
 	sessionID := filepath.Base(dir)
 
@@ -432,6 +437,9 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 	}
 	var state stateMeta
 	_ = json.Unmarshal(stateData, &state)
+	if state.Archived {
+		return nil
+	}
 
 	createdAt := metaTS(state.CreatedAt, state.CreatedAlt)
 	updatedAt := metaTS(state.UpdatedAt, state.UpdatedAlt)

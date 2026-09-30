@@ -248,21 +248,25 @@ them** — a typo'd `rm -rf` silently does nothing, or hits the wrong tree.
 ### 1.2 Expected results
 
 Baselines on the unmodified fixtures: kimi 4, claude-code 5, codebuddy 1,
-codex 3, opencode 4 sessions. (Codex has four rollout files but only three valid
+codex 3, opencode 3 sessions. (Codex has four rollout files but only three valid
 sessions: the one whose first line is not `session_meta` is skipped, as
-`internal/provider/codex.TestFixtureParsing` pins.)
+`internal/provider/codex.TestFixtureParsing` pins.
 
-The expectations below describe the intended behavior. Cases marked *open* are
-known defects that still reproduce on this branch; the rest should pass, and a
-failure there is a regression, not a known issue.
+The OpenCode baseline is 3, not 4, because the fixture also holds a pre-1.1
+JSON-only session (`ses_jjjj…`) that is no longer merged in beside a database —
+see the policy in 1.7. It is still listed from a store without `opencode.db`:
+`internal/provider/opencode.TestJSONFallbackSession` builds one.
+
+The expectations below describe the intended behavior. All of them should pass;
+a failure is a regression, not a known issue.
 
 | case | store | expected | covers |
 |---|---|---|---|
-| A1 | `kimi-arch` | 4 sessions, `arch0001-…009` absent | D1 — **open** |
+| A1 | `kimi-arch` | 4 sessions, `arch0001-…009` absent | D1 — fixed |
 | B4 | `kimi-del` | 3 sessions, `dddd0002-…002` absent | — |
-| A2 | `oc-arch` | 4 sessions, `ses_bbbb…` absent | D2a — fixed |
-| A2b | `oc-child` | 4 sessions, `ses_cccc…` absent | — |
-| B5 | `oc-del` | 3 sessions, `ses_aaaa…` absent | D2b — **open**, blocked on policy |
+| A2 | `oc-arch` | 3 sessions, `ses_bbbb…` absent | D2a — fixed |
+| A2b | `oc-child` | 3 sessions, `ses_cccc…` absent | — |
+| B5 | `oc-del` | 2 sessions, `ses_aaaa…` absent | D2b — fixed |
 | B1 | `cc-del` | 4 sessions, `bbbbbbbb-0003…` absent | — |
 | C1 | `cc-side` | 5 sessions, `aaaaaaaa-0001…` stays `prompts=2 asst=2` | D3 — fixed |
 | C3 | `cc-sub` | 5 sessions, `aaaaaaaa-0009…` absent | — |
@@ -275,10 +279,13 @@ failure there is a regression, not a known issue.
 An archived session is one the agent has put away but not deleted. It must not
 be offered for resume.
 
-**A1 — Kimi Code lists archived sessions (defect D1)**
+**A1 — Kimi Code: archived sessions are skipped (defect D1, fixed)**
 
-Kimi's `state.json` carries `"archived": true/false`; the Kimi provider does not
-read that field, so an archived session is listed like any other.
+Kimi's `state.json` carries `"archived": true/false`, and Kimi's own session
+picker hides archived sessions from its list. The provider now reads the flag and
+skips an archived session in both `ListSessions` and `LoadDetail`, so it is
+neither listed nor loadable. The session directory and its wire stream stay on
+disk untouched — archiving in Kimi is not deleting.
 
 ```bash
 RESUMER_KIMI_HOME="$R/kimi-arch" ./resumer list --source kimi-code --all --json > /tmp/kimi-arch.json
@@ -286,26 +293,28 @@ summ /tmp/kimi-arch.json
 ```
 
 - Expected: `4 sessions`; `arch0001-1111-7000-8000-000000000009` absent.
-- Known result: `5 sessions`, archived one listed — FAIL. This is D1 and it is
-  still open.
+- Passes. Before the fix this listed `5 sessions` with the archived session
+  included (D1).
 - Picker check: `RESUMER_KIMI_HOME="$R/kimi-arch" ./resumer --source kimi-code`
   must not show "Archived Kimi Session".
 
-**A2 — OpenCode resurrects an archived session from the legacy JSON store (defect D2a)**
+**A2 — OpenCode: no session is resurrected from the legacy JSON store (defects D2a, D2b)**
 
 The SQLite filters are correct (`parent_id` set → child, `time_archived` set →
-archived), but the merge with the pre-1.1 JSON store only remembers the IDs
-SQLite *emitted*, so a leftover JSON file for a skipped session is appended as if
-it were live.
+archived). The problem was the merge with the pre-1.1 JSON store: a leftover JSON
+file for a session SQLite skips was appended as if it were live. The fix is the
+source-of-truth policy described in 1.7: the JSON store is not read at all when a
+database exists.
 
 ```bash
 RESUMER_OPENCODE_DATA="$R/oc-arch" ./resumer list --source opencode --all --json > /tmp/oc-arch.json
 summ /tmp/oc-arch.json
 ```
 
-- Expected: `4 sessions`; `ses_bbbb…` absent.
-- Known result: passes. Before the merge fix this listed `5 sessions` with
-  `ses_bbbb…` resurrected from the JSON copy (D2a).
+- Expected: `3 sessions`; `ses_bbbb…` absent.
+- Passes. Before the fix this listed `5 sessions`: `ses_bbbb…` came back from the
+  JSON copy, and so did the JSON-only `ses_jjjj…` (D2a). The 3 that remain are
+  the database roots that are neither archived nor children.
 
 **A2b — a child session in the legacy JSON store is still skipped (regression guard)**
 
@@ -314,8 +323,8 @@ RESUMER_OPENCODE_DATA="$R/oc-child" ./resumer list --source opencode --all --jso
 summ /tmp/oc-child.json
 ```
 
-- Expected: `4 sessions`; `ses_cccc…` absent, because the JSON record names its
-  parent. Passes, and must keep passing alongside the D2a fix.
+- Expected: `3 sessions`; `ses_cccc…` absent, because the JSON record names its
+  parent. Passes, and must keep passing alongside the D2a/D2b fix.
 
 **A3 — providers with no archive concept**
 
@@ -377,18 +386,20 @@ summ /tmp/kimi-del.json
 - Expected: `3 sessions`; `dddd0002-2222-7000-8000-000000000002` absent although
   its `session_index.jsonl` entry is still present. Passes.
 
-**B5 — OpenCode: delete the SQLite row, leave a JSON copy (defect D2b)**
+**B5 — OpenCode: delete the SQLite row, leave a JSON copy (defect D2b, fixed)**
 
 ```bash
 RESUMER_OPENCODE_DATA="$R/oc-del" ./resumer list --source opencode --all --json > /tmp/oc-del.json
 summ /tmp/oc-del.json
 ```
 
-- Expected: `3 sessions`; `ses_aaaa…` absent.
-- Known result: `4 sessions`, `ses_aaaa…` listed — FAIL.
-- Note for the report: the D2a fix (recording every ID SQLite *scanned*, not just
-  the ones it emitted) does **not** fix this case, because a deleted row is never
-  scanned at all. See 1.7.
+- Expected: `2 sessions`; `ses_aaaa…` absent.
+- Passes: with `opencode.db` present the JSON store is never read, so neither an
+  archived nor a deleted session can come back from a leftover file (D2b). See
+  1.7 for why the JSON store is not merged. The store started from 3 visible
+  database roots, so deleting one leaves 2 — the JSON copy must not add a third.
+- Note for the report: recording the IDs SQLite scanned cannot fix this case,
+  because a deleted row is never scanned at all.
 
 ### 1.5 C — sub-agent and sidechain records (related)
 
@@ -465,33 +476,32 @@ does not exist:
 
 | ID | provider | symptom | status |
 |---|---|---|---|
-| D1 | kimi-code | archived sessions are listed and offered for resume | **open** |
-| D2a | opencode | archived/child sessions resurrect from the legacy JSON store | fixed — `readSQLite` now reports every ID it scanned, and `listRaw` seeds `seen` with all of them |
-| D2b | opencode | a session whose SQLite row was deleted resurrects from a JSON copy | **open** — blocked on policy, see below |
+| D1 | kimi-code | archived sessions are listed and offered for resume | fixed — `parseSessionDir` returns `nil` for a session whose `state.json` says `"archived": true`, so `ListSessions` and `LoadDetail` both skip it |
+| D2a | opencode | archived/child sessions resurrect from the legacy JSON store | fixed — with a database present the JSON store is not read at all (see the policy below) |
+| D2b | opencode | a session whose SQLite row was deleted resurrects from a JSON copy | fixed — same policy: SQLite is the only source of truth when it exists |
 | D3 | claude-code, codebuddy | `isSidechain` records count as the main session's prompts/turns | fixed — both providers skip `isSidechain` records entirely |
 
-Both fixes carry regression tests that fail without them:
+All four fixes carry regression tests that fail without them:
+`internal/provider/kimi.TestArchivedSessionNotListed`,
+`internal/provider/opencode.TestLegacyJSONIgnoredWhenDatabaseExists`,
 `internal/provider/opencode.TestArchivedSessionNotResurrectedFromJSON`,
 `internal/provider/claudecode.TestSidechainRecordsDoNotCount`, and
 `internal/provider/codebuddy.TestSidechainRecordsDoNotCount`.
 
-**Open question behind D2b (case B5).** The pre-1.1 JSON store is legitimate
-data: a session that exists only there (the fixture's `ses_jjjj`) must still be
-listed. But a JSON copy of a session whose SQLite row is gone is
-indistinguishable from that legitimate case using the data alone, so recording
-scanned IDs — the fix for D2a — cannot fix D2b. Candidate policies, to be
-decided before B5 can pass:
-
-1. Ignore the JSON store entirely when `opencode.db` exists. Simple, but drops
-   legitimate JSON-only sessions that were never migrated.
-2. Treat a JSON session as stale when its `time.updated` predates the database
-   file's creation. Cheap heuristic; fragile across clock skew and file copies.
-3. Ask the agent's own data (for example a deletion tombstone) instead of
-   guessing. Correct if such a marker exists — needs verification against the
-   installed OpenCode version.
-
-Until one is chosen, report B5 as FAIL with the note "blocked on policy
-decision", not as a plain defect.
+**Policy behind D2a/D2b (cases A2, A2b, B5): the database is the only source of
+truth when it exists.** Recording every ID SQLite scanned — the first fix
+attempted for D2a — cannot cover D2b: a deleted row is never scanned, so a JSON
+copy of it is indistinguishable from a legitimate JSON-only session using the
+data alone. The pre-1.1 JSON store is therefore *not* merged with the database;
+it is a fallback for installs that predate the database (`listRaw`: if
+`dbPath() != ""` → SQLite only, else → JSON only). That matches the agent:
+OpenCode empties `storage/session/` when it migrates to SQLite and never
+produces a JSON-only session beside a database, and its own listing query is
+`WHERE time_archived IS NULL AND parent_id IS NULL`, so a JSON leftover beside a
+database is by definition a session OpenCode no longer lists. Third-party
+OpenCode readers keep the same rule (SQLite as the source of truth when the
+session table exists; JSON only when there is no database). The JSON parser is
+still covered by tests that build a store without `opencode.db`.
 
 ## 2. Condensed regression — previously verified behavior
 
@@ -505,6 +515,8 @@ one-minute sanity check only.
 | deleted working directory labeled, resume refused, `mkdir -p` printed, exit 3 | `internal/cwd.*`, `internal/render.TestRenderersFlagMissingWorkingDirectory`, `tests/integration.TestSelectRefusesWhenWorkingDirectoryIsGone` | 1.6 |
 | unknown cwd shows `(unknown)` and is not refused | `internal/cwd.TestResolveUnknownCwdIsNotRefused`, `internal/provider/kimi.TestSessionWithoutIndexEntryOrWire` | pick a kimi session with no recorded cwd |
 | archived + child sessions skipped in SQLite | `internal/provider/opencode.TestArchivedAndChildSkipped` | A2 / A2b |
+| archived kimi sessions skipped in `ListSessions` and `LoadDetail` | `internal/provider/kimi.TestArchivedSessionNotListed` | A1 |
+| legacy JSON ignored when `opencode.db` exists; used only without one | `internal/provider/opencode.TestLegacyJSONIgnoredWhenDatabaseExists`, `internal/provider/opencode.TestJSONFallbackSession` | A2 / A2b / B5 |
 | provider enable/disable; a disabled provider is not scanned | `internal/provider.TestActiveFiltersDisabledProviders`, `internal/cli.TestProviderCmdOffListOn` | `./resumer provider off kimi-code`, then `./resumer list --all` |
 | date / project / limit filters | `internal/provider/*.TestDateFilter`, `TestProjectFilter`, `TestFilters` | `./resumer list --days 7` |
 | picker sort toggle and source cycling | `tests/integration.TestSortToggleAndSourceCycle` | press the sort key, then cycle source |
@@ -569,6 +581,31 @@ resumer was started. Whether kimi accepts that, or fails with
 records the directory. Find such a session and report which happens; if kimi
 fails, find where the directory is recorded and teach the provider to read it.
 
+### 3.3 An OpenCode database whose table is not called `session`
+
+The 1.7 policy reads only `session` from `opencode.db`. OpenCode 2.0.18 renamed
+that table (`session_v2`), and resumer does not know the new name, so on such a
+version the provider fails with
+
+```
+error: opencode db ~/.local/share/opencode/opencode.db: sqliteread: table not found
+```
+
+instead of listing anything (a `storage/` directory has to exist as well, or
+`IsAvailable` declines first and you get the plain "not available" error). It
+does **not** silently fall back to the JSON store — a database is only trusted
+when it can be read. To confirm which name your install uses:
+
+```bash
+sqlite3 ~/.local/share/opencode/opencode.db ".tables"
+./resumer list --source opencode --all
+```
+
+If the table is `session_v2`, the fix is to accept both names (and map the
+renamed columns) in `readSQLite`. Deliberately not applied yet — no fixture or
+installed version has been checked against it, and guessing a column layout is
+worse than the current error.
+
 ## 4. Interpreting `asst_count`
 
 `asst_count` is a provider-defined estimate of assistant-side activity, not an
@@ -621,11 +658,11 @@ run "A1  kimi archived      (expect 4, no arch0001...009)" \
     RESUMER_KIMI_HOME="$R/kimi-arch" ./resumer list --source kimi-code --all --json
 run "B4  kimi deleted       (expect 3, no dddd0002...002)" \
     RESUMER_KIMI_HOME="$R/kimi-del" ./resumer list --source kimi-code --all --json
-run "A2  opencode archived  (expect 4, no ses_bbbb)" \
+run "A2  opencode archived  (expect 3, no ses_bbbb)" \
     RESUMER_OPENCODE_DATA="$R/oc-arch" ./resumer list --source opencode --all --json
-run "A2b opencode child     (expect 4, no ses_cccc)" \
+run "A2b opencode child     (expect 3, no ses_cccc)" \
     RESUMER_OPENCODE_DATA="$R/oc-child" ./resumer list --source opencode --all --json
-run "B5  opencode deleted   (expect 3, no ses_aaaa)" \
+run "B5  opencode deleted   (expect 2, no ses_aaaa)" \
     RESUMER_OPENCODE_DATA="$R/oc-del" ./resumer list --source opencode --all --json
 run "B1  claude-code deleted(expect 4, no bbbbbbbb-0003)" \
     RESUMER_CLAUDE_PROJECT_ROOT="$R/cc-del" ./resumer list --source claude-code --all --json
@@ -656,14 +693,14 @@ the collector's file.
 | case | expected | actual (paste) | PASS / FAIL / N-A | notes |
 |---|---|---|---|---|
 | A1 kimi archived | 4, `arch0001-…009` absent | | | |
-| A2 opencode archived leftover | 4, `ses_bbbb…` absent | | | |
-| A2b opencode child leftover | 4, `ses_cccc…` absent | | | |
+| A2 opencode archived leftover | 3, `ses_bbbb…` absent | | | |
+| A2b opencode child leftover | 3, `ses_cccc…` absent | | | |
 | A3 no-archive providers | nothing to exclude | | | |
 | B1 claude-code deleted | 4, `bbbbbbbb-0003…` absent | | | |
 | B2 codebuddy deleted | 0 | | | |
 | B3 codex deleted rollout | 2, `019cccc1…001` absent | | | |
 | B4 kimi deleted dir | 3, `dddd0002…002` absent | | | |
-| B5 opencode deleted row | 3, `ses_aaaa…` absent | | | blocked on policy |
+| B5 opencode deleted row | 2, `ses_aaaa…` absent | | | |
 | C1 claude-code sidechain | `aaaaaaaa-0001…` stays 2 / 2 | | | |
 | C2 codebuddy sidechain | `cb111111…` stays 2 / 1 | | | |
 | C3 `subagents/` skipped | 5, `aaaaaaaa-0009…` absent | | | |

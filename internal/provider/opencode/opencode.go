@@ -288,28 +288,25 @@ func projectLabel(dir string) string {
 	return "(unknown)"
 }
 
-// readSQLite returns the visible sessions and the set of every session ID it
-// scanned, including the ones it skipped as archived or as a child/subagent
-// session. listRaw needs the full set: a leftover legacy JSON file for a
-// session SQLite already knows about must not resurrect it.
-func (p *Provider) readSQLite(path string) ([]session.Session, map[string]bool, error) {
+// readSQLite returns the visible sessions from the database: root sessions
+// that are neither archived (time_archived set) nor a child/subagent session
+// (parent_id set).
+func (p *Provider) readSQLite(path string) ([]session.Session, error) {
 	db, err := sqliteread.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	prompts := indexSQLitePrompts(db)
 	tbl, err := db.Table("session")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var out []session.Session
-	scanned := map[string]bool{}
 	err = tbl.Scan(func(r sqliteread.Row) error {
 		id, _ := r.Str("id")
 		if id == "" {
 			return nil
 		}
-		scanned[id] = true
 		if parent, _ := r.Str("parent_id"); parent != "" {
 			return nil // child/subagent session
 		}
@@ -339,9 +336,9 @@ func (p *Provider) readSQLite(path string) ([]session.Session, map[string]bool, 
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return out, scanned, nil
+	return out, nil
 }
 
 type jsonSessionFile struct {
@@ -452,34 +449,23 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 	return out, nil
 }
 
-// listRaw returns every visible session, SQLite-first, merged with any
-// legacy JSON-only sessions (deduped by ID; SQLite wins).
+// listRaw returns every visible session.
+//
+// The SQLite database is the only source of truth whenever it exists. opencode
+// empties storage/session/ when it moves to the database, so a JSON file left
+// beside a database is a leftover of a session the user deleted or archived
+// there — reading it would resurrect that session, which is exactly what must
+// not happen. The JSON store is therefore only a fallback for installs that
+// predate the database.
 func (p *Provider) listRaw() ([]session.Session, error) {
-	var out []session.Session
-	// seen holds every session ID the SQLite store knows about, not only the
-	// ones it emitted: a legacy JSON copy of a session SQLite skipped as
-	// archived or as a child must not resurrect it.
-	seen := map[string]bool{}
 	if path := dbPath(); path != "" {
-		ss, scanned, err := p.readSQLite(path)
+		ss, err := p.readSQLite(path)
 		if err != nil {
 			return nil, fmt.Errorf("opencode db %s: %w", path, err)
 		}
-		for id := range scanned {
-			seen[id] = true
-		}
-		out = append(out, ss...)
+		return ss, nil
 	}
-	js, err := p.readJSON()
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range js {
-		if !seen[s.SessionID] {
-			out = append(out, s)
-		}
-	}
-	return out, nil
+	return p.readJSON()
 }
 
 func touchesDate(s *session.Session, day time.Time) bool {

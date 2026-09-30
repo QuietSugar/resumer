@@ -1,12 +1,42 @@
 package kimi
 
 import (
+	"io/fs"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/QuietSugar/resumer/internal/session"
 )
+
+// copyTree copies a fixture into a temp directory so a test can mutate it
+// without touching what `go test ./...` reads.
+func copyTree(t *testing.T, src, dst string) error {
+	t.Helper()
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(src, path)
+		if rerr != nil {
+			return rerr
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+}
 
 func fixtureDir(t *testing.T, parts ...string) string {
 	t.Helper()
@@ -265,5 +295,56 @@ func TestNoTimeFilterByDefault(t *testing.T) {
 	}
 	if len(sessions) != 4 {
 		t.Fatalf("zero-value filter listed %d sessions, want 4 (no time limit)", len(sessions))
+	}
+}
+
+// kimi flags archived sessions in state.json and keeps them out of its own
+// session picker, so resumer must not list or load them either. The session
+// directory and its wire stream stay on disk.
+func TestArchivedSessionNotListed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kimi-home")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(t, fixtureDir(t, "kimi-home"), root); err != nil {
+		t.Fatal(err)
+	}
+
+	// Archive one of the four fixture sessions in place.
+	archived := filepath.Join(root, "sessions", "*kimi-one_*", "*", "state.json")
+	matches, err := filepath.Glob(archived)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("fixture session state.json: %v (%v)", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(data), `"archived":false`, `"archived":true`, 1)
+	if updated == string(data) {
+		t.Fatal("fixture state.json has no archived flag to flip")
+	}
+	if err := os.WriteFile(matches[0], []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("RESUMER_KIMI_HOME", root)
+	p := New()
+	sessions, err := p.ListSessions(session.Filters{AllTime: true, Days: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 3 {
+		t.Fatalf("listed %d sessions, want 3 (one archived session skipped)", len(sessions))
+	}
+	for _, s := range sessions {
+		if s.SessionID == "dddd0001-1111-7000-8000-000000000001" {
+			t.Error("archived session was listed")
+		}
+	}
+
+	// It must not be loadable as a detail either.
+	if d, err := p.LoadDetail("dddd0001-1111-7000-8000-000000000001"); err != nil || d != nil {
+		t.Errorf("LoadDetail(archived) = %v, %v; want nil, nil", d, err)
 	}
 }
