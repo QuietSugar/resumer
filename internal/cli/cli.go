@@ -50,7 +50,7 @@ Unified AI CLI session resumer.
 
 options:
   --source NAME    limit to a single provider (claude-code | codebuddy | codex | kimi-code | opencode)
-  --days N         only show sessions active in the last N days (default: 7)
+  --days N         only show sessions active in the last N days (default: no limit)
   --date DATE      YYYY-MM-DD — only sessions active on this date
   --all            no time filter
   --project STR    substring match against project name
@@ -129,7 +129,7 @@ func Run(argv []string, version string) int {
 	var (
 		showVersion = fs.Bool("version", false, "print version")
 		source      = fs.String("source", "", "limit to a single provider")
-		days        = fs.Int("days", 7, "window in days")
+		days        = fs.Int("days", 0, "only show sessions active in the last N days; 0 = no limit")
 		date        = fs.String("date", "", "YYYY-MM-DD")
 		all         = fs.Bool("all", false, "no time filter")
 		project     = fs.String("project", "", "project substring")
@@ -228,7 +228,7 @@ func runPicker(filters session.Filters) int {
 	}
 	if chosen == nil {
 		if empty {
-			fmt.Fprintln(os.Stderr, "No sessions found. Try --days 7 or --all.")
+			fmt.Fprintln(os.Stderr, "No sessions found. Try without --project/--date, or check `resumer provider list`.")
 		}
 		return 0
 	}

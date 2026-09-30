@@ -31,12 +31,14 @@ type Session struct {
 	ResumeArgv []string
 }
 
-// Filters mirrors the CLI surface. Days < 0 means "unset" (provider default).
+// Filters narrows what a provider lists. The zero value means "no
+// constraints": Days == 0 is the CLI default and imposes no time limit, so
+// every session found on disk is listed.
 type Filters struct {
-	Days    int
-	Date    string
-	AllTime bool
-	Project string
-	Limit   int
-	Source  string
+	Days    int    // 0 = no time limit (default); N = last N days only
+	Date    string // YYYY-MM-DD — single-day overlap mode, overrides Days
+	AllTime bool   // explicit "ignore the time window" (same as Days == 0)
+	Project string // case-insensitive substring match on the project label
+	Limit   int    // >0 caps the merged result after sorting
+	Source  string // restrict to one provider name
 }

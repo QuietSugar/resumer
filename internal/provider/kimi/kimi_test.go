@@ -252,3 +252,18 @@ func TestNormalizeTS(t *testing.T) {
 		}
 	}
 }
+
+// TestNoTimeFilterByDefault locks in the CLI default: Days == 0 (the zero
+// value) must impose no time limit. The fixtures are dated 2026-04-15, far
+// outside any recent window, so a stale default would silently drop them all.
+func TestNoTimeFilterByDefault(t *testing.T) {
+	t.Setenv(envKimiHome, fixtureDir(t, "kimi-home"))
+	p := New()
+	sessions, err := p.ListSessions(session.Filters{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 4 {
+		t.Fatalf("zero-value filter listed %d sessions, want 4 (no time limit)", len(sessions))
+	}
+}

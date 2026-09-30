@@ -217,14 +217,15 @@ func TestFilters(t *testing.T) {
 	if len(proj2) != 1 || proj2[0].SessionID != "ses_eeeeeeeeeeeeeeeeeeeeeeeeeeee" {
 		t.Errorf("project filter oc-two = %+v", proj2)
 	}
-	// default window (Days unset → 3-day cutoff) vs 2026-04-15 fixtures:
-	// today is far past, so nothing qualifies.
-	recent, err := p.ListSessions(session.Filters{})
+	// An explicit narrow window vs the 2026-04-15 fixtures: today is far past,
+	// so nothing qualifies. (The zero value no longer implies a window —
+	// Days == 0 means "no time limit" and is the CLI default.)
+	recent, err := p.ListSessions(session.Filters{Days: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(recent) != 0 {
-		t.Errorf("default window should exclude ancient fixtures, got %d", len(recent))
+		t.Errorf("3-day window should exclude ancient fixtures, got %d", len(recent))
 	}
 }
 
@@ -254,5 +255,19 @@ func TestAvailability(t *testing.T) {
 	t.Setenv(envData, "/nonexistent/resumer-qa")
 	if p.IsAvailable() {
 		t.Error("missing data root must not be available")
+	}
+}
+
+// TestNoTimeFilterByDefault locks in the CLI default: Days == 0 (the zero
+// value) must impose no time limit. The fixtures are dated 2026-04-15, far
+// outside any recent window, so a stale default would silently drop them all.
+func TestNoTimeFilterByDefault(t *testing.T) {
+	p := newProvider(t)
+	sessions, err := p.ListSessions(session.Filters{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 4 {
+		t.Fatalf("zero-value filter listed %d sessions, want 4 (no time limit)", len(sessions))
 	}
 }

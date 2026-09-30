@@ -645,10 +645,11 @@ func touchesDate(s *session.Session, day time.Time) bool {
 	return !(ls.Before(start) || fs_.After(end))
 }
 
-// cutoffForFilters: local midnight minus N days (provider default 3 when the
-// CLI left Days unset). Nil when --all or --date is in play.
+// cutoffForFilters: local midnight minus N days. Nil when there is no time
+// window at all — --all, --date, or the CLI default of "no limit" (Days == 0)
+// — so every parsed session is kept.
 func cutoffForFilters(f session.Filters) *time.Time {
-	if f.AllTime || f.Date != "" {
+	if f.AllTime || f.Date != "" || f.Days == 0 {
 		return nil
 	}
 	days := f.Days

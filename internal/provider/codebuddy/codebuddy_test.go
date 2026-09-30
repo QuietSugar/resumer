@@ -110,3 +110,18 @@ func TestAvailabilityAndDetailLookup(t *testing.T) {
 		t.Fatalf("detail lookup = %+v", got)
 	}
 }
+
+// TestNoTimeFilterByDefault locks in the CLI default: Days == 0 (the zero
+// value) must impose no time limit. The fixtures are dated 2026-04-15, far
+// outside any recent window, so a stale default would silently drop them all.
+func TestNoTimeFilterByDefault(t *testing.T) {
+	t.Setenv("RESUMER_CODEBUDDY_HOME", fixtureRoot(t))
+	p := New()
+	sessions, err := p.ListSessions(session.Filters{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("zero-value filter listed %d sessions, want 1 (no time limit)", len(sessions))
+	}
+}

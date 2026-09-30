@@ -270,7 +270,7 @@ func findSessionFiles(root string) []string {
 }
 
 func cutoff(f session.Filters, now time.Time) *time.Time {
-	if f.AllTime || f.Date != "" {
+	if f.AllTime || f.Date != "" || f.Days == 0 {
 		return nil
 	}
 	days := f.Days

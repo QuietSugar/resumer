@@ -26,15 +26,17 @@ macOS & Linux (arm64/amd64). Windows is on the roadmap.
 
 ```bash
 resumer              # interactive picker
-resumer list         # plain list, last 7 days
+resumer list         # plain list, every session
 resumer --help       # everything else
 ```
 
 Picker keys: `↑↓` browse · `/` filter · `tab` cycle source · `ctrl-s` toggle sort ·
 `enter` resume · `esc` cancel.
 
-Useful flags (both picker and `list`): `--days N`, `--date YYYY-MM-DD`, `--all`,
-`--project foo`, `--source claude-code|codebuddy|codex|kimi-code|opencode`, `--limit N`. List mode adds
+Useful flags (both picker and `list`): `--days N` (narrow to the last N days —
+**the default is no time limit, so every session is listed**), `--date YYYY-MM-DD`,
+`--all` (kept for compatibility; it is now the default), `--project foo`,
+`--source claude-code|codebuddy|codex|kimi-code|opencode`, `--limit N`. List mode adds
 `--json` and `--full [N]`. The `asst_count` JSON field and detail-preview
 assistant activity figure are provider-specific rough size estimates; counting
 rules differ and the values are not exact or directly comparable across providers.
