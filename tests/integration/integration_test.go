@@ -100,6 +100,9 @@ func materializeFixtureCwds(t *testing.T) {
 // --- 08: unified render ---
 
 func TestUnifiedRender(t *testing.T) {
+	// Realistic machine: the fixture projects exist, so rows show their names.
+	// kimi-four is the deliberate exception (its dir is never created).
+	materializeFixtureCwds(t)
 	cmd := exec.Command(binPath, "list", "--all")
 	cmd.Env = fixtureEnv(t)
 	out, err := cmd.Output()
@@ -111,6 +114,11 @@ func TestUnifiedRender(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("output missing %q", want)
 		}
+	}
+	// The one session whose working directory is gone must say so instead of
+	// passing its stale name off as a live project.
+	if !strings.Contains(s, textutil.DirDeletedLabel) {
+		t.Errorf("output should flag the deleted working directory: %q", s)
 	}
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	if len(lines) < 3 {
@@ -460,13 +468,15 @@ func TestSelectRefusesWhenWorkingDirectoryIsGone(t *testing.T) {
 	env := append(fixtureEnv(t), "KIMI_MOCK_LOG="+logPath)
 
 	r := startPicker(t, env, "--source=kimi-code", "--project", "kimi-four")
-	// The condition must be visible before the user commits to the row.
-	r.waitFor(t, textutil.DirMissingMarker, 5*time.Second)
+	// The project column must say the directory is gone before the user
+	// commits to the row.
+	r.waitFor(t, textutil.DirDeletedLabel, 5*time.Second)
 	r.send("\r")
 	// Enter must not exec, and the console must say the session cannot be
 	// resumed and what to do about it.
 	r.waitFor(t, "cannot resume", 5*time.Second)
-	r.waitFor(t, "recreate that directory", 5*time.Second)
+	r.waitFor(t, "has been deleted", 5*time.Second)
+	r.waitFor(t, "mkdir -p", 5*time.Second)
 
 	select {
 	case err := <-r.done:

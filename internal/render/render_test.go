@@ -48,18 +48,28 @@ func TestRenderersFlagMissingWorkingDirectory(t *testing.T) {
 		Source: "kimi-code", SessionID: "s1", ProjectLabel: "old-project",
 		Cwd: filepath.Join(t.TempDir(), "deleted-project"), FirstPrompt: "hello",
 	}
-	if idx := Index([]session.Session{gone}); !strings.Contains(idx, textutil.DirMissingMarker) {
-		t.Errorf("index row should flag the missing directory:\n%s", idx)
+	idx := Index([]session.Session{gone})
+	// The project column must say the directory is gone, not pass the stale
+	// name off as a live project.
+	if !strings.Contains(idx, textutil.DirDeletedLabel) {
+		t.Errorf("index row should mark the deleted directory:\n%s", idx)
 	}
-	if box := FullBox(&gone); !strings.Contains(box, "directory no longer exists") {
-		t.Errorf("detail box should flag the missing directory:\n%s", box)
+	if strings.Contains(idx, "old-project") {
+		t.Errorf("index row should not show the stale project name:\n%s", idx)
+	}
+	box := FullBox(&gone)
+	if !strings.Contains(box, "directory no longer exists") {
+		t.Errorf("detail box should mark the deleted directory:\n%s", box)
+	}
+	if !strings.Contains(box, gone.Cwd) {
+		t.Errorf("detail box should still show the missing path:\n%s", box)
 	}
 
 	alive := session.Session{
 		Source: "kimi-code", SessionID: "s2", ProjectLabel: "live-project",
 		Cwd: t.TempDir(), FirstPrompt: "hello",
 	}
-	if idx := Index([]session.Session{alive}); strings.Contains(idx, textutil.DirMissingMarker) {
+	if idx := Index([]session.Session{alive}); strings.Contains(idx, textutil.DirDeletedLabel) {
 		t.Errorf("a session whose cwd exists must not be flagged:\n%s", idx)
 	}
 	if box := FullBox(&alive); strings.Contains(box, "directory no longer exists") {

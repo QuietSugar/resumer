@@ -407,14 +407,18 @@ func providerNames() []string {
 // directory" error that names neither the real cause nor the fix.
 const exitCannotResume = 3
 
-// reportMissingCwd explains the refusal and the single action that fixes it.
-func reportMissingCwd(s *session.Session, cwd string) {
+// reportMissingCwd explains the refusal and hands the user the one command
+// that unblocks it, ready to paste.
+func reportMissingCwd(s *session.Session, dir string) {
 	fmt.Fprintf(os.Stderr,
-		"error: cannot resume [%s] %s — its working directory no longer exists:\n",
+		"error: cannot resume [%s] %s — its working directory has been deleted:\n",
 		s.Source, s.SessionID)
-	fmt.Fprintf(os.Stderr, "       %s\n", cwd)
+	fmt.Fprintf(os.Stderr, "       %s\n", dir)
 	fmt.Fprintf(os.Stderr,
-		"       recreate that directory first (mkdir -p) if you want to resume this session.\n")
+		"       the agent CLI cannot start there, so resumer did not run the resume command.\n")
+	fmt.Fprintf(os.Stderr, "       to resume this session, recreate the directory first:\n")
+	fmt.Fprintf(os.Stderr, "         mkdir -p %q\n", dir)
+	fmt.Fprintf(os.Stderr, "       then run resumer again and select this session.\n")
 }
 
 // execResume chdirs into the session's directory and replaces the process

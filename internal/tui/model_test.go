@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuietSugar/resumer/internal/provider"
 	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 type refreshProvider struct {
@@ -158,6 +159,61 @@ func TestFormatLastActivity(t *testing.T) {
 	for _, tc := range cases {
 		if got := formatLastActivity(tc.ts, now); got != tc.want {
 			t.Errorf("formatLastActivity(%q) = %q, want %q", tc.ts, got, tc.want)
+		}
+	}
+}
+
+// The column header must line up with the fixed columns the rows use,
+// otherwise the picker shows a header that points at nothing.
+func TestColumnHeaderAlignsWithRowColumns(t *testing.T) {
+	m := list.New(nil, rowDelegate{}, 240, 3)
+	item := sessionItem{s: session.Session{
+		Source: "kimi-code", SessionID: "session-1", ProjectLabel: "project",
+		Title: "A distinct session title", Cwd: t.TempDir(),
+	}}
+	var row bytes.Buffer
+	(rowDelegate{}).Render(&row, m, 0, item)
+
+	head := ColumnHeader()
+	for _, label := range []string{"age", "src", "project", "title"} {
+		if !strings.Contains(head, label) {
+			t.Errorf("column header is missing the %q label: %q", label, head)
+		}
+	}
+	// Compare display columns, not byte offsets: the row's cursor glyph is
+	// three bytes wide but occupies one column.
+	plain := func(s string) string {
+		var b strings.Builder
+		for i := 0; i < len(s); i++ {
+			if s[i] == 0x1b {
+				for i < len(s) && s[i] != 'm' {
+					i++
+				}
+				continue
+			}
+			b.WriteByte(s[i])
+		}
+		return b.String()
+	}
+	colOf := func(s, sub string) int {
+		i := strings.Index(s, sub)
+		if i < 0 {
+			return -1
+		}
+		return textutil.DisplayWidth(s[:i])
+	}
+	h, r := plain(head), plain(row.String())
+	for _, pair := range [][2]string{
+		{"project", "project"},          // header label vs the project value
+		{"title", "A distinct session"}, // header label vs the title value
+	} {
+		hc, rc := colOf(h, pair[0]), colOf(r, pair[1])
+		if hc < 0 || rc < 0 {
+			t.Fatalf("could not locate %q in header/row: %q / %q", pair[0], h, r)
+		}
+		if hc != rc {
+			t.Errorf("%q column starts at display column %d in the header but %d in the row:\nheader: %q\nrow:    %q",
+				pair[0], hc, rc, h, r)
 		}
 	}
 }

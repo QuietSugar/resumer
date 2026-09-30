@@ -31,7 +31,9 @@ resumer --help       # everything else
 ```
 
 Picker keys: `↑↓` browse · `/` filter · `tab` cycle source · `ctrl-s` toggle sort ·
-`enter` resume · `esc` cancel.
+`enter` resume · `esc` cancel. The session list carries a one-line column
+header (`age` `src` `project` `title`) so the fixed-width rows are
+self-describing.
 
 Useful flags (both picker and `list`): `--days N` (narrow to the last N days —
 **the default is no time limit, so every session is listed**), `--date YYYY-MM-DD`,
@@ -98,17 +100,20 @@ resumer also fixes a real-world annoyance: when a session's stored cwd has gone
 stale (iCloud/Obsidian path drift), it re-derives the correct project directory
 from the session file location, so `claude --resume` actually works.
 
-When a session's working directory no longer exists at all — the project was
-renamed, moved, or deleted, or the session data was carried to another machine —
-that session cannot be resumed. resumer flags it in the list (`⚠ dir missing`)
-and in the picker, and refuses to launch the agent CLI on Enter, printing the
-missing path and the fix instead of the CLI's own opaque
-`created under a different directory` error:
+When a session's working directory has been deleted — the project was renamed,
+moved, or removed, or the session data was carried to another machine — that
+session cannot be resumed. resumer replaces the project column with
+`已删除` in both `resumer list` and the picker, and refuses to launch the
+agent CLI on Enter, printing the missing path and the command that unblocks it
+instead of the CLI's own opaque `created under a different directory` error:
 
 ```
-error: cannot resume [kimi-code] <session id> — its working directory no longer exists:
+error: cannot resume [kimi-code] <session id> — its working directory has been deleted:
        /home/xu/git-repo/my-project
-       recreate that directory first (mkdir -p) if you want to resume this session.
+       the agent CLI cannot start there, so resumer did not run the resume command.
+       to resume this session, recreate the directory first:
+         mkdir -p "/home/xu/git-repo/my-project"
+       then run resumer again and select this session.
 ```
 
 <details>

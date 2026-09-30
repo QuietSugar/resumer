@@ -176,7 +176,7 @@ func (m *Model) resize() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
-	headerH := 2 // title line + help line
+	headerH := 3 // title line + help line + column header
 	warnH := 0
 	if len(m.warnings) > 0 {
 		warnH = len(m.warnings)
@@ -367,6 +367,7 @@ func (m Model) View() string {
 	}
 	b.WriteString(headerStyle.Render(title) + "  " + helpStyle.Render(status) + "\n")
 	b.WriteString(helpStyle.Render(helpLine) + "\n")
+	b.WriteString(ColumnHeader() + "\n")
 	for _, w := range m.warnings {
 		b.WriteString(warnStyle.Render(w) + "\n")
 	}

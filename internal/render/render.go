@@ -74,7 +74,11 @@ func Index(sessions []session.Session) string {
 		s := &sessions[i]
 		last := textutil.PadDisplay(FmtLastShort(s.LastTS), 17)
 		badge := Badge(s.Source, BadgeANSI[s.Source])
-		proj := textutil.PadDisplay(textutil.TrimDisplay(s.ProjectLabel, 25), 25)
+		projLabel := s.ProjectLabel
+		if cwd.Missing(s) {
+			projLabel = textutil.DirDeletedLabel
+		}
+		proj := textutil.PadDisplay(textutil.TrimDisplay(projLabel, 25), 25)
 		msgs := s.AsstCount + len(s.Prompts)
 		markers := textutil.VolumeMarker(msgs) + "  "
 		first := textutil.TrimDisplay(s.FirstPrompt, FirstPromptWidth)
@@ -89,14 +93,7 @@ func Index(sessions []session.Session) string {
 		if aux != "" {
 			label = firstPadded + "  " + aux
 		}
-		// A session whose working directory is gone cannot be resumed; flag
-		// it before the prompt column so the marker stays inside an
-		// 80-column terminal instead of trailing off the right edge.
-		flag := ""
-		if cwd.Missing(s) {
-			flag = textutil.DirMissingMarker + "  "
-		}
-		out = append(out, fmt.Sprintf("%s %s %s %s%s%s", last, badge, proj, markers, flag, label))
+		out = append(out, fmt.Sprintf("%s %s %s %s  %s", last, badge, proj, markers, label))
 	}
 	return strings.Join(out, "\n")
 }
@@ -114,7 +111,7 @@ func FullBox(s *session.Session) string {
 	case dir == "":
 		dir = "(none)"
 	case cwd.Missing(s):
-		dir += "  (directory no longer exists)"
+		dir += "  (directory no longer exists — recreate it before resuming)"
 	}
 	add("│ source:         [%s]", s.Source)
 	add("│ 📁 project:     %s", s.ProjectLabel)

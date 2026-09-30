@@ -116,10 +116,11 @@ func PadDisplay(s string, targetW int) string {
 	return s + strings.Repeat(" ", targetW-w)
 }
 
-// DirMissingMarker flags a session whose recorded working directory no longer
-// exists, so it cannot be resumed until that directory is recreated. Shared by
-// the list renderer, the detail box, and the picker row so all three agree.
-const DirMissingMarker = "⚠ dir missing"
+// DirDeletedLabel replaces the project column for a session whose recorded
+// working directory no longer exists. Such a session cannot be resumed until
+// the directory is recreated, so the row must not pass itself off as a live
+// project — and it must not read as a bare "(unknown)" either.
+const DirDeletedLabel = "已删除"
 
 // VolumeMarker is the fixed 1-col conversation weight marker:
 // <20 blank / 20-49 · / 50-149 ● / 150+ ◉
