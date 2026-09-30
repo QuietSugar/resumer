@@ -118,4 +118,4 @@ Roadmap: Gemini provider · Windows support.
 
 ---
 
-MIT © 2026 Jintae Song — see [LICENSE](LICENSE).
+MIT © 2026 Jintae Song · QuietSugar — see [LICENSE](LICENSE).
