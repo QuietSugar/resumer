@@ -4,7 +4,7 @@ import (
 	"os"
 	"runtime/debug"
 
-	"github.com/jin-ttao/resumer/internal/cli"
+	"github.com/QuietSugar/resumer/internal/cli"
 )
 
 // version is injected at release time via -ldflags "-X main.version=...".

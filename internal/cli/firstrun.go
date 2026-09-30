@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-const starURL = "https://github.com/jin-ttao/resumer"
+const starURL = "https://github.com/QuietSugar/resumer"
 
 func stateDir() string {
 	base := os.Getenv("XDG_STATE_HOME")

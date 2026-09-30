@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 func fixtureRoot(t *testing.T) string {

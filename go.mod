@@ -1,4 +1,4 @@
-module github.com/jin-ttao/resumer
+module github.com/QuietSugar/resumer
 
 go 1.24.2
 

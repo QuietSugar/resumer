@@ -11,13 +11,13 @@ back in the conversation.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jin-ttao/resumer/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/QuietSugar/resumer/main/install.sh | sh
 ```
 
 or with Go:
 
 ```bash
-go install github.com/jin-ttao/resumer@latest
+go install github.com/QuietSugar/resumer@latest
 ```
 
 macOS & Linux (arm64/amd64). Windows is on the roadmap.
@@ -100,7 +100,7 @@ from the session file location, so `claude --resume` actually works.
 <summary>Development</summary>
 
 ```bash
-git clone https://github.com/jin-ttao/resumer.git
+git clone https://github.com/QuietSugar/resumer.git
 cd resumer
 go build -o resumer .
 ./tests/run-qa.sh --no-vhs   # go vet + full test suite (no external deps)
@@ -118,4 +118,4 @@ Roadmap: Gemini provider · Windows support.
 
 ---
 
-Built by [@jin-ttao](https://github.com/jin-ttao). If this helped, leaving a ⭐ helps others find it.
+MIT © 2026 Jintae Song — see [LICENSE](LICENSE).

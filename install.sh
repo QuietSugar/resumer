@@ -1,14 +1,14 @@
 #!/bin/sh
 # resumer installer — downloads the latest release binary.
 #
-#   curl -fsSL https://raw.githubusercontent.com/jin-ttao/resumer/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/QuietSugar/resumer/main/install.sh | sh
 #
 # Env overrides:
 #   RESUMER_INSTALL_DIR   target dir (default: ~/.local/bin)
 #   RESUMER_VERSION       tag to install (default: latest, e.g. v0.2.0)
 set -eu
 
-REPO="jin-ttao/resumer"
+REPO="QuietSugar/resumer"
 INSTALL_DIR="${RESUMER_INSTALL_DIR:-$HOME/.local/bin}"
 
 os="$(uname -s)"

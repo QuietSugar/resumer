@@ -14,17 +14,17 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"github.com/jin-ttao/resumer/internal/config"
-	"github.com/jin-ttao/resumer/internal/execres"
-	"github.com/jin-ttao/resumer/internal/provider"
-	"github.com/jin-ttao/resumer/internal/provider/claudecode"
-	"github.com/jin-ttao/resumer/internal/provider/codebuddy"
-	"github.com/jin-ttao/resumer/internal/provider/codex"
-	"github.com/jin-ttao/resumer/internal/provider/kimi"
-	"github.com/jin-ttao/resumer/internal/provider/opencode"
-	"github.com/jin-ttao/resumer/internal/render"
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/tui"
+	"github.com/QuietSugar/resumer/internal/config"
+	"github.com/QuietSugar/resumer/internal/execres"
+	"github.com/QuietSugar/resumer/internal/provider"
+	"github.com/QuietSugar/resumer/internal/provider/claudecode"
+	"github.com/QuietSugar/resumer/internal/provider/codebuddy"
+	"github.com/QuietSugar/resumer/internal/provider/codex"
+	"github.com/QuietSugar/resumer/internal/provider/kimi"
+	"github.com/QuietSugar/resumer/internal/provider/opencode"
+	"github.com/QuietSugar/resumer/internal/render"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/tui"
 )
 
 func registerProviders() {

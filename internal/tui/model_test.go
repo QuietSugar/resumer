@@ -11,8 +11,8 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jin-ttao/resumer/internal/provider"
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/provider"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 type refreshProvider struct {

@@ -16,9 +16,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jin-ttao/resumer/internal/provider"
-	"github.com/jin-ttao/resumer/internal/render"
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/provider"
+	"github.com/QuietSugar/resumer/internal/render"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 const helpLine = "↑↓ browse · / filter · tab source · ctrl-s sort · ctrl-r rescan · enter resume · esc cancel"

@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 func fixtureDir(t *testing.T, parts ...string) string {
