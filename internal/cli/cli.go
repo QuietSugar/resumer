@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"github.com/QuietSugar/resumer/internal/config"
+	"github.com/QuietSugar/resumer/internal/cwd"
 	"github.com/QuietSugar/resumer/internal/execres"
 	"github.com/QuietSugar/resumer/internal/provider"
 	"github.com/QuietSugar/resumer/internal/provider/claudecode"
@@ -401,29 +402,36 @@ func providerNames() []string {
 	return out
 }
 
+// exitCannotResume is returned when a session's working directory is gone, so
+// the agent CLI would fail on its own with a "created under a different
+// directory" error that names neither the real cause nor the fix.
+const exitCannotResume = 3
+
+// reportMissingCwd explains the refusal and the single action that fixes it.
+func reportMissingCwd(s *session.Session, cwd string) {
+	fmt.Fprintf(os.Stderr,
+		"error: cannot resume [%s] %s — its working directory no longer exists:\n",
+		s.Source, s.SessionID)
+	fmt.Fprintf(os.Stderr, "       %s\n", cwd)
+	fmt.Fprintf(os.Stderr,
+		"       recreate that directory first (mkdir -p) if you want to resume this session.\n")
+}
+
 // execResume chdirs into the session's directory and replaces the process
 // with the provider's resume command.
 //
-// For Claude Code and its CodeBuddy fork, prefer a cwd derived from the
-// session file's encoded parent directory. A stale stored cwd can make either
-// CLI fail to locate the project-local session.
+// When the resolved directory does not exist at all, resumer refuses instead
+// of exec'ing: the agent CLI would only report that the session "was created
+// under a different directory", which tells the user nothing about the real
+// problem or how to fix it.
 func execResume(s *session.Session) int {
-	targetCwd := ""
-	if s.Source == "claude-code" || s.Source == "codebuddy" {
-		targetCwd = claudecode.ResolveExecCwd(s.Path, s.Cwd)
+	targetCwd, ok := cwd.Resolve(s)
+	if !ok {
+		reportMissingCwd(s, targetCwd)
+		return exitCannotResume
 	}
-	if targetCwd == "" {
-		targetCwd = s.Cwd
-	}
-
 	if targetCwd != "" {
-		if st, err := os.Stat(targetCwd); err == nil && st.IsDir() {
-			_ = os.Chdir(targetCwd)
-		} else {
-			wd, _ := os.Getwd()
-			fmt.Fprintf(os.Stderr,
-				"warning: session cwd not accessible, running from %s: %s\n", wd, targetCwd)
-		}
+		_ = os.Chdir(targetCwd)
 	}
 
 	if len(s.ResumeArgv) == 0 {

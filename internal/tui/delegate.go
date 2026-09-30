@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/QuietSugar/resumer/internal/cwd"
 	"github.com/QuietSugar/resumer/internal/session"
 	"github.com/QuietSugar/resumer/internal/textutil"
 )
@@ -110,6 +111,11 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 
 	row := fmt.Sprintf("%s%s %s %s %s %s",
 		cursor, dimStyle.Render(last), badge, rowStyle.Render(proj), dimStyle.Render(title), marker)
+	// A session whose working directory is gone cannot be resumed; say so in
+	// the row itself, before the user presses enter.
+	if cwd.Missing(s) {
+		row += " " + warnStyle.Render(textutil.DirMissingMarker)
+	}
 
 	// Clip to the list's width so long rows never wrap and break the layout.
 	fmt.Fprint(w, lipgloss.NewStyle().MaxWidth(m.Width()).Render(row))

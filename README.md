@@ -98,6 +98,19 @@ resumer also fixes a real-world annoyance: when a session's stored cwd has gone
 stale (iCloud/Obsidian path drift), it re-derives the correct project directory
 from the session file location, so `claude --resume` actually works.
 
+When a session's working directory no longer exists at all — the project was
+renamed, moved, or deleted, or the session data was carried to another machine —
+that session cannot be resumed. resumer flags it in the list (`⚠ dir missing`)
+and in the picker, and refuses to launch the agent CLI on Enter, printing the
+missing path and the fix instead of the CLI's own opaque
+`created under a different directory` error:
+
+```
+error: cannot resume [kimi-code] <session id> — its working directory no longer exists:
+       /home/xu/git-repo/my-project
+       recreate that directory first (mkdir -p) if you want to resume this session.
+```
+
 <details>
 <summary>Development</summary>
 

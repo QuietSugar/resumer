@@ -1,6 +1,5 @@
-package claudecode
-
-// Resume cwd resolution.
+// Package cwd answers one question for every consumer: where would this
+// session's resume command run, and can it run at all?
 //
 // claude --resume <uuid> derives the project dir from the CURRENT cwd by
 // encoding it (/, space, ~ all become -) and looking under
@@ -9,11 +8,18 @@ package claudecode
 // Obsidian vault paths), making the resume fail. Defense: derive cwd from the
 // session file's encoded parent dir, which is always correct because it is
 // where claude stored the file.
+//
+// The list renderer, the TUI, and the exec dispatcher all go through Resolve,
+// so a row flagged as unresumable is exactly a row Enter will refuse — the
+// alternative is a marker that cries wolf on sessions that resume fine.
+package cwd
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 // maxWalkDepth guards against symlink loops; typical iCloud paths are ~8 deep.
@@ -29,6 +35,38 @@ func encodeCwd(path string) string {
 func isDir(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.IsDir()
+}
+
+// Resolve returns the directory the resume command must run from and reports
+// whether the session is resumable at all. ok is false when the recorded
+// directory is known but no longer exists — the project was renamed, moved, or
+// deleted, or the session data was carried to another machine — and nothing
+// else can stand in for it.
+//
+// An empty dir with ok == true means "cwd unknown": run from wherever resumer
+// was started.
+func Resolve(s *session.Session) (dir string, ok bool) {
+	if s.Source == "claude-code" || s.Source == "codebuddy" {
+		dir = ResolveExecCwd(s.Path, s.Cwd)
+	}
+	if dir == "" {
+		dir = s.Cwd
+	}
+	if dir == "" {
+		return "", true // cwd unknown — run from wherever resumer was started
+	}
+	if !isDir(dir) {
+		return dir, false
+	}
+	return dir, true
+}
+
+// Missing reports whether Resolve would refuse, i.e. whether the session's
+// working directory is gone and cannot be recovered. Renderers use it to flag
+// such sessions before the user commits to them.
+func Missing(s *session.Session) bool {
+	_, ok := Resolve(s)
+	return !ok
 }
 
 // ResolveExecCwd finds a filesystem dir whose encoding matches the session's

@@ -6,6 +6,7 @@
 package integration
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuietSugar/resumer/internal/textutil"
 	"github.com/creack/pty"
 )
 
@@ -77,6 +79,10 @@ func materializeFixtureCwds(t *testing.T) {
 		"/tmp/resumer-fixtures/alpha",
 		"/tmp/resumer-fixtures/beta",
 		"/tmp/resumer-fixtures/codebuddy-alpha",
+		"/tmp/resumer-fixtures/codex-one",
+		"/tmp/resumer-fixtures/codex-two",
+		"/tmp/resumer-fixtures/codex-three",
+		"/tmp/resumer-fixtures/codex-four",
 		"/tmp/resumer-fixtures/obsidian path with space/vault",
 		"/tmp/resumer-fixtures/kimi-one",
 		"/tmp/resumer-fixtures/kimi-two",
@@ -441,5 +447,38 @@ func TestOpenCodeSelectExec(t *testing.T) {
 	pwdRE := regexp.MustCompile(`pwd=(/private)?/tmp/resumer-fixtures/oc-three`)
 	if !pwdRE.MatchString(log) {
 		t.Errorf("expected exec from the session directory, log: %q", log)
+	}
+}
+
+// --- 13: stale cwd — refuse instead of handing the user an opaque error ---
+
+// kimi-four records /tmp/resumer-fixtures/kimi-four, which
+// materializeFixtureCwds deliberately does not create: the directory is gone,
+// exactly like a renamed, moved, or migrated checkout.
+func TestSelectRefusesWhenWorkingDirectoryIsGone(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "kimi-mock.log")
+	env := append(fixtureEnv(t), "KIMI_MOCK_LOG="+logPath)
+
+	r := startPicker(t, env, "--source=kimi-code", "--project", "kimi-four")
+	// The condition must be visible before the user commits to the row.
+	r.waitFor(t, textutil.DirMissingMarker, 5*time.Second)
+	r.send("\r")
+	// Enter must not exec, and the console must say the session cannot be
+	// resumed and what to do about it.
+	r.waitFor(t, "cannot resume", 5*time.Second)
+	r.waitFor(t, "recreate that directory", 5*time.Second)
+
+	select {
+	case err := <-r.done:
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.ExitCode() != 3 {
+			t.Errorf("exit status = %v, want 3 (cannot resume)", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("picker process did not exit after the refusal")
+	}
+
+	if b, err := os.ReadFile(logPath); err == nil {
+		t.Errorf("the agent CLI must not run when the cwd is gone, log: %q", b)
 	}
 }

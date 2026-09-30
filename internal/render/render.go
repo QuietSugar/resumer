@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/QuietSugar/resumer/internal/cwd"
 	"github.com/QuietSugar/resumer/internal/session"
 	"github.com/QuietSugar/resumer/internal/textutil"
 )
@@ -88,7 +89,14 @@ func Index(sessions []session.Session) string {
 		if aux != "" {
 			label = firstPadded + "  " + aux
 		}
-		out = append(out, fmt.Sprintf("%s %s %s %s  %s", last, badge, proj, markers, label))
+		// A session whose working directory is gone cannot be resumed; flag
+		// it before the prompt column so the marker stays inside an
+		// 80-column terminal instead of trailing off the right edge.
+		flag := ""
+		if cwd.Missing(s) {
+			flag = textutil.DirMissingMarker + "  "
+		}
+		out = append(out, fmt.Sprintf("%s %s %s %s%s%s", last, badge, proj, markers, flag, label))
 	}
 	return strings.Join(out, "\n")
 }
@@ -101,9 +109,12 @@ func FullBox(s *session.Session) string {
 	add := func(format string, a ...any) {
 		lines = append(lines, fmt.Sprintf(format, a...))
 	}
-	cwd := s.Cwd
-	if cwd == "" {
-		cwd = "(none)"
+	dir := s.Cwd
+	switch {
+	case dir == "":
+		dir = "(none)"
+	case cwd.Missing(s):
+		dir += "  (directory no longer exists)"
 	}
 	add("│ source:         [%s]", s.Source)
 	add("│ 📁 project:     %s", s.ProjectLabel)
@@ -111,7 +122,7 @@ func FullBox(s *session.Session) string {
 	add("│ started:        %s", textutil.FmtTS(s.FirstTS, true))
 	add("│ last activity:  %s", textutil.FmtTS(s.LastTS, true))
 	add("│ duration:       %s", textutil.FmtDuration(s.FirstTS, s.LastTS))
-	add("│ cwd:            %s", cwd)
+	add("│ cwd:            %s", dir)
 	add("│ activity:       %d user prompts / ~%d assistant activity", len(s.Prompts), s.AsstCount)
 	if s.Title != "" {
 		add("│ title:          %s", s.Title)
