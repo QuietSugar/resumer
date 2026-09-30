@@ -31,9 +31,9 @@ resumer --help       # everything else
 ```
 
 Picker keys: `↑↓` browse · `/` filter · `tab` cycle source · `ctrl-s` toggle sort ·
-`enter` resume · `esc` cancel. The session list carries a one-line column
-header (`age` `src` `project` `title`) so the fixed-width rows are
-self-describing.
+`enter` resume · `esc` cancel. They are listed on the last line of the
+screen. The session list carries a one-line column header (`age` `src`
+`project` `title`) so the fixed-width rows are self-describing.
 
 Useful flags (both picker and `list`): `--days N` (narrow to the last N days —
 **the default is no time limit, so every session is listed**), `--date YYYY-MM-DD`,
@@ -103,7 +103,7 @@ from the session file location, so `claude --resume` actually works.
 When a session's working directory has been deleted — the project was renamed,
 moved, or removed, or the session data was carried to another machine — that
 session cannot be resumed. resumer replaces the project column with
-`已删除` in both `resumer list` and the picker, and refuses to launch the
+`(deleted)` in both `resumer list` and the picker, and refuses to launch the
 agent CLI on Enter, printing the missing path and the command that unblocks it
 instead of the CLI's own opaque `created under a different directory` error:
 

@@ -64,3 +64,20 @@ func TestResolveRecoversStaleStoredCwd(t *testing.T) {
 		t.Error("Missing() must agree with Resolve()")
 	}
 }
+
+// A session with no recorded cwd at all is NOT treated as deleted: resumer
+// cannot know where it lived, so it still runs the resume command from the
+// current directory. Whether that is enough for kimi is an open question —
+// kimi reports "created under a different directory" when its own record of
+// the directory disagrees with the process cwd. Verified against real data in
+// docs/real-world-testing.md ("Kimi sessions without a recorded cwd").
+func TestResolveUnknownCwdIsNotRefused(t *testing.T) {
+	s := session.Session{Source: "kimi-code", Cwd: ""}
+	got, ok := Resolve(&s)
+	if !ok || got != "" {
+		t.Errorf("unknown cwd: got (%q, %v), want (\"\", true) - resumer cannot know it is gone", got, ok)
+	}
+	if Missing(&s) {
+		t.Error("an unknown cwd must not be reported as a deleted directory")
+	}
+}

@@ -112,6 +112,38 @@ RESUMER_KIMI_HOME="$KIMI_DATA" ./resumer --source kimi-code
 
 The resume command is `kimi --session <session-id>`.
 
+### Kimi sessions without a recorded cwd (needs real-machine verification)
+
+Some kimi sessions carry no working directory anywhere resumer can read: no
+`cwd`/`workDir` in `state.json`, and no matching entry in `session_index.jsonl`.
+resumer cannot invent a path it was never given, so those rows show `(unknown)`
+in the project column and Enter still runs `kimi --session <id>` from whatever
+directory resumer was started in. Whether kimi accepts that, or fails with
+`Session "..." was created under a different directory`, depends on where kimi
+itself keeps the session's directory.
+
+The automated suite only pins the current behavior:
+`TestSessionWithoutIndexEntryOrWire` (empty cwd, `(unknown)` label) and
+`TestResolveUnknownCwdIsNotRefused` (unknown is not treated as deleted).
+
+To close this on a real machine, find such a session and report which of these
+holds:
+
+```bash
+# 1. Does the session really have no recorded directory?
+jq '{cwd, workDir}' ~/.kimi-code/sessions/*/<session-id>/state.json
+grep '<session-id>' ~/.kimi-code/session_index.jsonl
+
+# 2. What does the picker show in the project column, and what happens on Enter?
+RESUMER_KIMI_HOME="$HOME/.kimi-code" ./resumer --source kimi-code
+```
+
+- If kimi resumes successfully from an unrelated cwd, nothing to do.
+- If kimi fails, find where kimi records the directory (check
+  `~/.kimi-code/sessions/<workDirKey>/<session-id>/` and the CLI's own logs)
+  and teach the provider to read it, so the row can be labeled and the resume
+  can be refused the way a deleted directory is.
+
 ## 4. Test CodeBuddy CLI
 
 CodeBuddy session JSONL files are read from `~/.codebuddy/projects/` by default. Set `CODEBUDDY_HOME` for a custom CodeBuddy root, or set `RESUMER_CODEBUDDY_HOME` to override the root for resumer only.
