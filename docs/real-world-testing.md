@@ -80,6 +80,43 @@ These overrides are resumer-only: they change where resumer looks, never where
 the agent stores data. `--all` disables the time filter (the CLI default is
 already "no limit"; keep `--all` so the intent is explicit).
 
+### 0.3 Provider availability
+
+A provider is skipped entirely — including by an explicit `--source` — when it
+reports itself unavailable, and you get an error instead of a list:
+
+```
+error: <provider> provider not available (binary or session directory missing)
+```
+
+That is not a "0 sessions" result and none of the cases below apply. The rule
+differs per provider:
+
+| provider | data dir | agent binary |
+|---|---|---|
+| claude-code | required | not checked |
+| codebuddy | required | not checked |
+| kimi-code | required | required |
+| codex | required | required |
+| opencode | required (`opencode.db` or `storage/`) | required |
+
+So kimi-code, codex, and opencode need the agent's CLI on `PATH`. If you do not
+have it installed — or do not want the real CLI launched by a resume test —
+point resumer at the mock CLIs the repository ships for QA:
+
+```bash
+MB=$(git rev-parse --show-toplevel)/tests/mock-bin
+export RESUMER_KIMI_BIN="$MB/kimi"
+export RESUMER_CODEX_BIN="$MB/codex"
+export RESUMER_OPENCODE_BIN="$MB/opencode"
+```
+
+The mocks record their invocation (`pwd` and arguments) to
+`/tmp/resumer-qa/<name>-mock.log` and exit, so a resume test can assert the
+command without starting the agent. Every command in section 1 works with the
+mocks in place; only the picker checks in 1.6 need a real CLI if you want to see
+the agent actually open a session.
+
 ## 1. Archived and deleted sessions
 
 Each case owns its own store, copied from a fixture, so cases are independent
@@ -211,21 +248,27 @@ them** — a typo'd `rm -rf` silently does nothing, or hits the wrong tree.
 ### 1.2 Expected results
 
 Baselines on the unmodified fixtures: kimi 4, claude-code 5, codebuddy 1,
-codex 4, opencode 4 sessions.
+codex 3, opencode 4 sessions. (Codex has four rollout files but only three valid
+sessions: the one whose first line is not `session_meta` is skipped, as
+`internal/provider/codex.TestFixtureParsing` pins.)
 
-| case | store | expected | current build |
+The expectations below describe the intended behavior. Cases marked *open* are
+known defects that still reproduce on this branch; the rest should pass, and a
+failure there is a regression, not a known issue.
+
+| case | store | expected | covers |
 |---|---|---|---|
-| A1 | `kimi-arch` | 4 sessions, `arch0001-…009` absent | 5 — listed (D1) |
-| B4 | `kimi-del` | 3 sessions, `dddd0002-…002` absent | 3 — passes |
-| A2 | `oc-arch` | 4 sessions, `ses_bbbb…` absent | 5 — listed (D2a) |
-| A2b | `oc-child` | 4 sessions, `ses_cccc…` absent | 4 — passes |
-| B5 | `oc-del` | 3 sessions, `ses_aaaa…` absent | 4 — listed (D2b) |
-| B1 | `cc-del` | 4 sessions, `bbbbbbbb-0003…` absent | 4 — passes |
-| C1 | `cc-side` | 5 sessions, `aaaaaaaa-0001…` stays `prompts=2 asst=2` | `3 / 3` (D3) |
-| C3 | `cc-sub` | 5 sessions, `aaaaaaaa-0009…` absent | 5 — passes |
-| B2 | `cb-del` | 0 sessions | 0 — passes |
-| C2 | `cb-side` | 1 session, `cb111111…` stays `prompts=2 asst=1` | `3 / 2` (D3) |
-| B3 | `cx-del` | 3 sessions, `019cccc1-…001` absent | 3 — passes |
+| A1 | `kimi-arch` | 4 sessions, `arch0001-…009` absent | D1 — **open** |
+| B4 | `kimi-del` | 3 sessions, `dddd0002-…002` absent | — |
+| A2 | `oc-arch` | 4 sessions, `ses_bbbb…` absent | D2a — fixed |
+| A2b | `oc-child` | 4 sessions, `ses_cccc…` absent | — |
+| B5 | `oc-del` | 3 sessions, `ses_aaaa…` absent | D2b — **open**, blocked on policy |
+| B1 | `cc-del` | 4 sessions, `bbbbbbbb-0003…` absent | — |
+| C1 | `cc-side` | 5 sessions, `aaaaaaaa-0001…` stays `prompts=2 asst=2` | D3 — fixed |
+| C3 | `cc-sub` | 5 sessions, `aaaaaaaa-0009…` absent | — |
+| B2 | `cb-del` | 0 sessions | — |
+| C2 | `cb-side` | 1 session, `cb111111…` stays `prompts=2 asst=1` | D3 — fixed |
+| B3 | `cx-del` | 2 sessions, `019cccc1-…001` absent | — |
 
 ### 1.3 A — archived sessions
 
@@ -243,7 +286,8 @@ summ /tmp/kimi-arch.json
 ```
 
 - Expected: `4 sessions`; `arch0001-1111-7000-8000-000000000009` absent.
-- Current build: `5 sessions`, archived one listed — FAIL (D1).
+- Known result: `5 sessions`, archived one listed — FAIL. This is D1 and it is
+  still open.
 - Picker check: `RESUMER_KIMI_HOME="$R/kimi-arch" ./resumer --source kimi-code`
   must not show "Archived Kimi Session".
 
@@ -260,7 +304,8 @@ summ /tmp/oc-arch.json
 ```
 
 - Expected: `4 sessions`; `ses_bbbb…` absent.
-- Current build: `5 sessions`, `ses_bbbb…` listed — FAIL (D2a).
+- Known result: passes. Before the merge fix this listed `5 sessions` with
+  `ses_bbbb…` resurrected from the JSON copy (D2a).
 
 **A2b — a child session in the legacy JSON store is still skipped (regression guard)**
 
@@ -270,7 +315,7 @@ summ /tmp/oc-child.json
 ```
 
 - Expected: `4 sessions`; `ses_cccc…` absent, because the JSON record names its
-  parent. Passes today and must keep passing once D2a is fixed.
+  parent. Passes, and must keep passing alongside the D2a fix.
 
 **A3 — providers with no archive concept**
 
@@ -313,8 +358,11 @@ RESUMER_CODEX_SESSION_ROOT="$R/cx-del" RESUMER_CODEX_INDEX_FILE="$R/cx-del/sessi
 summ /tmp/cx-del.json
 ```
 
-- Expected: `3 sessions`; `019cccc1-1111-7000-8000-000000000001` absent even
-  though its index entry (with a thread name) is still there. Passes.
+- Expected: `2 sessions`; `019cccc1-1111-7000-8000-000000000001` absent even
+  though its index entry (with a thread name) is still there. The store starts
+  from 3 sessions, not 4: the fixture's fourth rollout
+  (`…019cccc4-…`) begins with an `event_msg` line instead of `session_meta` and
+  is skipped, which is why the real count drops by exactly one here.
 - The fixture index also holds a ghost entry,
   `019cccc9-9999-7000-8000-000000000099`, with no rollout file at all. It must
   never appear in any run, including the ones above.
@@ -337,10 +385,10 @@ summ /tmp/oc-del.json
 ```
 
 - Expected: `3 sessions`; `ses_aaaa…` absent.
-- Current build: `4 sessions`, `ses_aaaa…` listed — FAIL.
-- Note for the report: fixing D2a (recording every ID SQLite *scanned*, not just
+- Known result: `4 sessions`, `ses_aaaa…` listed — FAIL.
+- Note for the report: the D2a fix (recording every ID SQLite *scanned*, not just
   the ones it emitted) does **not** fix this case, because a deleted row is never
-  scanned. See 1.7.
+  scanned at all. See 1.7.
 
 ### 1.5 C — sub-agent and sidechain records (related)
 
@@ -359,7 +407,8 @@ summ /tmp/cc-side.json
   `prompts=2` and `asst_count=2` — the fixture's own values, pinned by
   `internal/provider/claudecode.TestFixtureParsing`. The string
   `SUBAGENT PROMPT MUST NOT COUNT` must not appear anywhere in the output.
-- Current build: `prompts=3`, `asst_count=3` — FAIL (D3).
+- Known result: passes. Before the `isSidechain` fix this reported
+  `prompts=3`, `asst_count=3` (D3).
 
 **C2 — CodeBuddy**
 
@@ -371,7 +420,8 @@ summ /tmp/cb-side.json
 - Expected: `1 session`, and for `cb111111-1111-4111-8111-111111111111`
   `prompts=2` and `asst_count=1` — pinned by
   `internal/provider/codebuddy.TestFixtureParsing`.
-- Current build: `prompts=3`, `asst_count=2` — FAIL (D3).
+- Known result: passes. Before the `isSidechain` fix this reported
+  `prompts=3`, `asst_count=2` (D3).
 - If your CodeBuddy version never writes `isSidechain`, mark `N-A` and say so.
   That is useful information, not a pass.
 
@@ -415,10 +465,15 @@ does not exist:
 
 | ID | provider | symptom | status |
 |---|---|---|---|
-| D1 | kimi-code | archived sessions are listed and offered for resume | open |
-| D2a | opencode | archived/child sessions resurrect from the legacy JSON store | open |
-| D2b | opencode | a session whose SQLite row was deleted resurrects from a JSON copy | open |
-| D3 | claude-code, codebuddy | `isSidechain` records count as the main session's prompts/turns | open |
+| D1 | kimi-code | archived sessions are listed and offered for resume | **open** |
+| D2a | opencode | archived/child sessions resurrect from the legacy JSON store | fixed — `readSQLite` now reports every ID it scanned, and `listRaw` seeds `seen` with all of them |
+| D2b | opencode | a session whose SQLite row was deleted resurrects from a JSON copy | **open** — blocked on policy, see below |
+| D3 | claude-code, codebuddy | `isSidechain` records count as the main session's prompts/turns | fixed — both providers skip `isSidechain` records entirely |
+
+Both fixes carry regression tests that fail without them:
+`internal/provider/opencode.TestArchivedSessionNotResurrectedFromJSON`,
+`internal/provider/claudecode.TestSidechainRecordsDoNotCount`, and
+`internal/provider/codebuddy.TestSidechainRecordsDoNotCount`.
 
 **Open question behind D2b (case B5).** The pre-1.1 JSON store is legitimate
 data: a session that exists only there (the fixture's `ses_jjjj`) must still be
@@ -466,6 +521,11 @@ agent's own session picker:
 ./resumer list --source kimi-code  --all
 ./resumer list --source opencode   --all
 ```
+
+These read the default roots from 0.2, so they need real local agent data; with
+none installed they stop with the availability error from 0.3. Point the
+overrides at a copy of a fixture instead if you only want to exercise the
+rendering.
 
 Compare session IDs, titles, working directories, timestamps, and first/last
 prompts with each agent's own history. Child/subagent sessions and archived
@@ -577,7 +637,7 @@ run "B2  codebuddy deleted  (expect 0)" \
     RESUMER_CODEBUDDY_HOME="$R/cb-del" ./resumer list --source codebuddy --all --json
 run "C2  codebuddy sidechain (cb111111 must stay prompts=2 asst=1)" \
     RESUMER_CODEBUDDY_HOME="$R/cb-side" ./resumer list --source codebuddy --all --json
-run "B3  codex deleted      (expect 3, no 019cccc1...001, never 019cccc9...099)" \
+run "B3  codex deleted      (expect 2, no 019cccc1...001, never 019cccc9...099)" \
     RESUMER_CODEX_SESSION_ROOT="$R/cx-del" RESUMER_CODEX_INDEX_FILE="$R/cx-del/session_index.jsonl" \
     ./resumer list --source codex --all --json
 
@@ -601,7 +661,7 @@ the collector's file.
 | A3 no-archive providers | nothing to exclude | | | |
 | B1 claude-code deleted | 4, `bbbbbbbb-0003…` absent | | | |
 | B2 codebuddy deleted | 0 | | | |
-| B3 codex deleted rollout | 3, `019cccc1…001` absent | | | |
+| B3 codex deleted rollout | 2, `019cccc1…001` absent | | | |
 | B4 kimi deleted dir | 3, `dddd0002…002` absent | | | |
 | B5 opencode deleted row | 3, `ses_aaaa…` absent | | | blocked on policy |
 | C1 claude-code sidechain | `aaaaaaaa-0001…` stays 2 / 2 | | | |

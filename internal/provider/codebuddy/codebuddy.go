@@ -61,6 +61,9 @@ type record struct {
 	Topic       string          `json:"topic"`
 	CustomTitle string          `json:"customTitle"`
 	AITitle     string          `json:"aiTitle"`
+	// IsSidechain marks records a sub-agent wrote into this session's file.
+	// They are not part of the main conversation.
+	IsSidechain bool            `json:"isSidechain"`
 	Content     json.RawMessage `json:"content"`
 	Message     json.RawMessage `json:"message"`
 }
@@ -142,6 +145,12 @@ func parseJSONL(path string) *session.Session {
 	for sc.Scan() {
 		var r record
 		if json.Unmarshal(sc.Bytes(), &r) != nil {
+			continue
+		}
+		if r.IsSidechain {
+			// Sub-agent traffic shares the file but is not this session's
+			// conversation: counting it would inflate the prompt list, the
+			// assistant-turn estimate, and the activity window.
 			continue
 		}
 		ts := parseTimestamp(r.Timestamp)

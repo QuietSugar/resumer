@@ -288,22 +288,28 @@ func projectLabel(dir string) string {
 	return "(unknown)"
 }
 
-func (p *Provider) readSQLite(path string) ([]session.Session, error) {
+// readSQLite returns the visible sessions and the set of every session ID it
+// scanned, including the ones it skipped as archived or as a child/subagent
+// session. listRaw needs the full set: a leftover legacy JSON file for a
+// session SQLite already knows about must not resurrect it.
+func (p *Provider) readSQLite(path string) ([]session.Session, map[string]bool, error) {
 	db, err := sqliteread.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	prompts := indexSQLitePrompts(db)
 	tbl, err := db.Table("session")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []session.Session
+	scanned := map[string]bool{}
 	err = tbl.Scan(func(r sqliteread.Row) error {
 		id, _ := r.Str("id")
 		if id == "" {
 			return nil
 		}
+		scanned[id] = true
 		if parent, _ := r.Str("parent_id"); parent != "" {
 			return nil // child/subagent session
 		}
@@ -333,9 +339,9 @@ func (p *Provider) readSQLite(path string) ([]session.Session, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return out, nil
+	return out, scanned, nil
 }
 
 type jsonSessionFile struct {
@@ -450,14 +456,17 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 // legacy JSON-only sessions (deduped by ID; SQLite wins).
 func (p *Provider) listRaw() ([]session.Session, error) {
 	var out []session.Session
+	// seen holds every session ID the SQLite store knows about, not only the
+	// ones it emitted: a legacy JSON copy of a session SQLite skipped as
+	// archived or as a child must not resurrect it.
 	seen := map[string]bool{}
 	if path := dbPath(); path != "" {
-		ss, err := p.readSQLite(path)
+		ss, scanned, err := p.readSQLite(path)
 		if err != nil {
 			return nil, fmt.Errorf("opencode db %s: %w", path, err)
 		}
-		for _, s := range ss {
-			seen[s.SessionID] = true
+		for id := range scanned {
+			seen[id] = true
 		}
 		out = append(out, ss...)
 	}

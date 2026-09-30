@@ -142,8 +142,11 @@ type record struct {
 	Snapshot  *struct {
 		Timestamp string `json:"timestamp"`
 	} `json:"snapshot"`
-	Cwd         string          `json:"cwd"`
-	Subtype     string          `json:"subtype"`
+	Cwd     string `json:"cwd"`
+	Subtype string `json:"subtype"`
+	// IsSidechain marks records a sub-agent wrote into this session's file.
+	// They are not part of the main conversation.
+	IsSidechain bool            `json:"isSidechain"`
 	Content     json.RawMessage `json:"content"`
 	Message     json.RawMessage `json:"message"`
 	CustomTitle string          `json:"customTitle"`
@@ -197,6 +200,12 @@ func (p *Provider) parseJSONL(path string) *session.Session {
 	for sc.Scan() {
 		var r record
 		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
+			continue
+		}
+		if r.IsSidechain {
+			// Sub-agent traffic shares the file but is not this session's
+			// conversation: counting it would inflate the prompt list, the
+			// assistant-turn estimate, and the activity window.
 			continue
 		}
 		ts := r.Timestamp
