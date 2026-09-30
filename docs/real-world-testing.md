@@ -73,11 +73,10 @@ The resume command is `opencode --session <session-id>`.
 
 ## 3. Test Kimi Code
 
-Kimi Code stores data in `$HOME/.kimi-code` by default. If you use a custom data directory, set `KIMI_DATA` to that directory. `RESUMER_KIMI_HOME` tells resumer which Kimi data root to inspect.
+Kimi Code stores data in `$HOME/.kimi-code` by default. If you use a custom data directory, set `KIMI_CODE_HOME` to that directory. `RESUMER_KIMI_HOME` tells resumer which Kimi data root to inspect, and overrides `KIMI_CODE_HOME` for resumer only.
 
 ```bash
-KIMI_DATA="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
-RESUMER_KIMI_HOME="$KIMI_DATA" \
+RESUMER_KIMI_HOME="${KIMI_CODE_HOME:-$HOME/.kimi-code}" \
   ./resumer list --source kimi-code --json --all \
   > /tmp/resumer-kimi.json
 ```
@@ -107,10 +106,48 @@ Compare session IDs, titles, working directories, timestamps, and first/last pro
 Verify resume behavior by selecting a session in the picker:
 
 ```bash
-RESUMER_KIMI_HOME="$KIMI_DATA" ./resumer --source kimi-code
+RESUMER_KIMI_HOME="${KIMI_CODE_HOME:-$HOME/.kimi-code}" ./resumer --source kimi-code
 ```
 
 The resume command is `kimi --session <session-id>`.
+
+### Custom Kimi data root (`KIMI_CODE_HOME`) — needs real-machine verification
+
+resumer's Kimi provider resolves its data root like this (`kimiHome()` in
+`internal/provider/kimi/kimi.go`):
+
+1. `RESUMER_KIMI_HOME`, if set — a resumer-only override used by the test suite
+2. otherwise `$HOME/.kimi-code`
+
+It never reads kimi's own `KIMI_CODE_HOME`. On a machine where the kimi data
+lives somewhere else, kimi and resumer therefore disagree about where the
+sessions are:
+
+| | reads sessions from |
+|---|---|
+| kimi | `$KIMI_CODE_HOME/sessions` |
+| resumer | `$HOME/.kimi-code/sessions` |
+
+The visible symptom is resumer listing no kimi sessions, or only stale ones,
+while `kimi` itself shows a full history. The commands in this section work
+around it by passing `KIMI_CODE_HOME` through to `RESUMER_KIMI_HOME`.
+
+To confirm on a real machine:
+
+```bash
+export KIMI_CODE_HOME=/path/to/custom/kimi-data
+
+# kimi's own view — should be populated
+ls "$KIMI_CODE_HOME/sessions"
+
+# resumer's view, without the workaround — expected to come up empty or stale
+./resumer --source kimi-code --all
+```
+
+If that is what you see, the fix is a precedence change in `kimiHome()`: consult
+`KIMI_CODE_HOME` before falling back to `$HOME/.kimi-code`, keeping
+`RESUMER_KIMI_HOME` as the explicit override. It is deliberately not applied
+yet — this section is the ticket for it.
 
 ### Kimi sessions without a recorded cwd (needs real-machine verification)
 
