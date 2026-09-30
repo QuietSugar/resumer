@@ -516,6 +516,7 @@ one-minute sanity check only.
 | unknown cwd shows `(unknown)` and is not refused | `internal/cwd.TestResolveUnknownCwdIsNotRefused`, `internal/provider/kimi.TestSessionWithoutIndexEntryOrWire` | pick a kimi session with no recorded cwd |
 | archived + child sessions skipped in SQLite | `internal/provider/opencode.TestArchivedAndChildSkipped` | A2 / A2b |
 | archived kimi sessions skipped in `ListSessions` and `LoadDetail` | `internal/provider/kimi.TestArchivedSessionNotListed` | A1 |
+| kimi ISO strings in `createdAt`/`updatedAt` still yield timestamps and cwd | `internal/provider/kimi.TestISOTimestampsAndWorkDirParsed` | 3.3 |
 | legacy JSON ignored when `opencode.db` exists; used only without one | `internal/provider/opencode.TestLegacyJSONIgnoredWhenDatabaseExists`, `internal/provider/opencode.TestJSONFallbackSession` | A2 / A2b / B5 |
 | provider enable/disable; a disabled provider is not scanned | `internal/provider.TestActiveFiltersDisabledProviders`, `internal/cli.TestProviderCmdOffListOn` | `./resumer provider off kimi-code`, then `./resumer list --all` |
 | date / project / limit filters | `internal/provider/*.TestDateFilter`, `TestProjectFilter`, `TestFilters` | `./resumer list --days 7` |
@@ -581,7 +582,31 @@ resumer was started. Whether kimi accepts that, or fails with
 records the directory. Find such a session and report which happens; if kimi
 fails, find where the directory is recorded and teach the provider to read it.
 
-### 3.3 An OpenCode database whose table is not called `session`
+### 3.3 Kimi `state.json` timestamp forms (fixed)
+
+kimi-code has written `createdAt`/`updatedAt` in two shapes: epoch-ms numbers in
+current builds, ISO strings in older ones. The provider now accepts both in the
+camelCase fields (`json.RawMessage` plus the existing `metaTS` normalization),
+alongside the snake_case `created_at`/`updated_at` fallback it already had.
+Before this, an ISO string in `createdAt` failed that one field and the session
+lost its `state.json` timestamps, so a session whose wire stream carries no
+`time` values had no timestamps at all and dropped out of `--days`/`--date`
+filtering.
+
+Regression fixture: `tests/fixtures/kimi-iso-home` — one session with ISO
+camelCase timestamps, a recorded `workDir`, and no `session_index.jsonl` entry
+(old kimi wrote none) — pinned by
+`internal/provider/kimi.TestISOTimestampsAndWorkDirParsed`.
+
+A tempting wrong diagnosis, recorded so it is not repeated: Go's
+`json.Unmarshal` reports the type error for `createdAt` but **keeps decoding the
+remaining fields**, so `title`, `workDir` and `lastPrompt` are *not* lost — only
+the two timestamp fields are. (Verified with a standalone probe; the regression
+test above still passes its title and cwd assertions against the pre-fix code.)
+So a session that shows `(unknown)` is not explained by this bug: its
+`state.json` has no `workDir`/`cwd` and no index entry, which is 3.2.
+
+### 3.4 An OpenCode database whose table is not called `session`
 
 The 1.7 policy reads only `session` from `opencode.db`. OpenCode 2.0.18 renamed
 that table (`session_v2`), and resumer does not know the new name, so on such a

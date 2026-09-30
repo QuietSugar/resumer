@@ -397,31 +397,52 @@ func earlierTS(a, b string) string {
 }
 
 type stateMeta struct {
-	Title      string      `json:"title"`
-	LastPrompt string      `json:"lastPrompt"`
-	CreatedAt  json.Number `json:"createdAt"` // epoch ms (real kimi-code form)
-	UpdatedAt  json.Number `json:"updatedAt"`
-	CreatedAlt string      `json:"created_at"` // ISO fallback form
-	UpdatedAlt string      `json:"updated_at"`
-	ForkedFrom string      `json:"forkedFrom"`
-	ForkedAlt  string      `json:"forked_from"`
-	Cwd        string      `json:"cwd"`
-	WorkDir    string      `json:"workDir"`
+	Title      string `json:"title"`
+	LastPrompt string `json:"lastPrompt"`
+	// CreatedAt/UpdatedAt are epoch-ms numbers in current kimi-code, but older
+	// builds wrote an ISO string into the same camelCase field. RawMessage keeps
+	// either form decodable: declaring json.Number makes a string value fail
+	// that field (and only that field) and lose the timestamp.
+	CreatedAt  json.RawMessage `json:"createdAt"`
+	UpdatedAt  json.RawMessage `json:"updatedAt"`
+	CreatedAlt string          `json:"created_at"` // ISO fallback form
+	UpdatedAlt string          `json:"updated_at"`
+	ForkedFrom string          `json:"forkedFrom"`
+	ForkedAlt  string          `json:"forked_from"`
+	Cwd        string          `json:"cwd"`
+	WorkDir    string          `json:"workDir"`
 	// Archived marks a session kimi has put away. kimi keeps the directory
 	// and its wire stream on disk but leaves archived sessions out of its
 	// own session picker, so resumer must not offer them either.
 	Archived bool `json:"archived"`
 }
 
-// metaTS resolves state.json timestamps: epoch-ms number first, then ISO
-// string fallback.
-func metaTS(n json.Number, iso string) string {
-	if n != "" {
-		if ts := normalizeTS(n.String()); ts != "" {
+// metaTS resolves state.json timestamps: the camelCase field (epoch-ms number
+// or ISO string) first, then the snake_case ISO fallback.
+func metaTS(raw json.RawMessage, iso string) string {
+	if s := rawText(raw); s != "" {
+		if ts := normalizeTS(s); ts != "" {
 			return ts
 		}
 	}
 	return normalizeTS(iso)
+}
+
+// rawText renders a RawMessage as plain text: a JSON number as-is, a JSON
+// string unquoted. Anything else (object, array, null, empty) yields "".
+func rawText(raw json.RawMessage) string {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return ""
+	}
+	if strings.HasPrefix(s, `"`) {
+		var out string
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return ""
+		}
+		return out
+	}
+	return s
 }
 
 // parseSessionDir reads one session directory (state.json + main wire.jsonl).

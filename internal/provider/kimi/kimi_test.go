@@ -348,3 +348,56 @@ func TestArchivedSessionNotListed(t *testing.T) {
 		t.Errorf("LoadDetail(archived) = %v, %v; want nil, nil", d, err)
 	}
 }
+
+// Older kimi-code builds wrote an ISO string into the same camelCase
+// createdAt/updatedAt fields that current builds fill with epoch-ms numbers, and
+// they wrote no session_index.jsonl entry at all. Both facts must survive: the
+// timestamps normalize, and the recorded workDir still resolves the cwd and
+// project label instead of falling through to "(unknown)".
+func TestISOTimestampsAndWorkDirParsed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kimi-iso-home")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(t, fixtureDir(t, "kimi-iso-home"), root); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RESUMER_KIMI_HOME", root)
+
+	p := New()
+	all, err := p.ListSessions(session.Filters{AllTime: true, Days: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("listed %d sessions, want 1", len(all))
+	}
+	s := all[0]
+
+	const wantCwd = "/home/xu/git-repo/git.sunmay.hall/cu/deploy"
+	if s.Cwd != wantCwd {
+		t.Errorf("cwd = %q, want %q", s.Cwd, wantCwd)
+	}
+	if s.ProjectLabel != "deploy" {
+		t.Errorf("project label = %q, want %q", s.ProjectLabel, "deploy")
+	}
+	// ISO timestamps are passed through as written (same convention as the
+	// snake_case created_at/updated_at path), milliseconds included.
+	if s.FirstTS != "2026-07-25T04:21:32.410Z" {
+		t.Errorf("first ts = %q, want the state.json createdAt", s.FirstTS)
+	}
+	if s.LastTS != "2026-07-25T04:26:10.000Z" {
+		t.Errorf("last ts = %q, want the state.json updatedAt", s.LastTS)
+	}
+	// The wire stream in this fixture carries no timestamps, so the values above
+	// can only have come from state.json.
+	if s.Title != "我想将此项目做成 Skill" {
+		t.Errorf("title = %q, want the state.json title (not the wire fallback)", s.Title)
+	}
+	if len(s.Prompts) != 2 || s.AsstCount != 2 {
+		t.Errorf("prompts/asst = %d/%d, want 2/2", len(s.Prompts), s.AsstCount)
+	}
+	if s.FirstPrompt != "旧版会话的第一个提示" || s.LastPrompt != "旧版会话的第二个提示" {
+		t.Errorf("prompts = %q / %q", s.FirstPrompt, s.LastPrompt)
+	}
+}
