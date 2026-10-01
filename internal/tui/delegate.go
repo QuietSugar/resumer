@@ -3,14 +3,16 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/textutil"
+	"github.com/QuietSugar/resumer/internal/cwd"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 // Compact fixed-width columns keep the session list readable in narrow terminals.
@@ -29,11 +31,26 @@ var (
 		"kimi-code":   lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
 		"opencode":    lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // blue
 	}
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
-	normalStyle   = lipgloss.NewStyle()
+	dimStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	colHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Bold(true)
+	selectedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
+	cursorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
+	normalStyle    = lipgloss.NewStyle()
 )
+
+// ColumnHeader renders the list's column header, aligned to the fixed columns
+// rowDelegate.Render uses (2-col cursor prefix, then one space between
+// columns). Keeping it here next to the column widths is what stops the header
+// and the rows from drifting apart.
+func ColumnHeader() string {
+	head := strings.Join([]string{
+		textutil.PadDisplay("age", colLast),
+		textutil.PadDisplay("src", colBadge),
+		textutil.PadDisplay("project", colProject),
+		textutil.PadDisplay("title", colTitle),
+	}, " ")
+	return colHeaderStyle.Render("  " + head)
+}
 
 // sessionItem adapts session.Session to bubbles/list.
 type sessionItem struct {
@@ -96,7 +113,11 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 		badgeText = "[oc]"
 	}
 	badge := badgeStyle[s.Source].Render(textutil.PadDisplay(badgeText, colBadge))
-	proj := textutil.PadDisplay(textutil.TrimDisplay(s.ProjectLabel, colProject), colProject)
+	projLabel := s.ProjectLabel
+	if cwd.Missing(s) {
+		projLabel = textutil.DirDeletedLabel
+	}
+	proj := textutil.PadDisplay(textutil.TrimDisplay(projLabel, colProject), colProject)
 	title := textutil.PadDisplay(textutil.TrimDisplay(s.Title, colTitle), colTitle)
 	marker := textutil.PadDisplay(textutil.VolumeMarker(s.AsstCount+len(s.Prompts)), 2)
 

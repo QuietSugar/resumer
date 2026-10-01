@@ -16,9 +16,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jin-ttao/resumer/internal/provider"
-	"github.com/jin-ttao/resumer/internal/render"
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/provider"
+	"github.com/QuietSugar/resumer/internal/render"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 const helpLine = "↑↓ browse · / filter · tab source · ctrl-s sort · ctrl-r rescan · enter resume · esc cancel"
@@ -176,12 +176,13 @@ func (m *Model) resize() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
-	headerH := 2 // title line + help line
+	headerH := 2 // title line + column header
+	footerH := 1 // key hints line
 	warnH := 0
 	if len(m.warnings) > 0 {
 		warnH = len(m.warnings)
 	}
-	bodyH := m.height - headerH - warnH
+	bodyH := m.height - headerH - footerH - warnH
 	if bodyH < 4 {
 		bodyH = 4
 	}
@@ -366,7 +367,7 @@ func (m Model) View() string {
 		status = m.spin.View() + " loading · " + status
 	}
 	b.WriteString(headerStyle.Render(title) + "  " + helpStyle.Render(status) + "\n")
-	b.WriteString(helpStyle.Render(helpLine) + "\n")
+	b.WriteString(ColumnHeader() + "\n")
 	for _, w := range m.warnings {
 		b.WriteString(warnStyle.Render(w) + "\n")
 	}
@@ -385,6 +386,9 @@ func (m Model) View() string {
 		preview = lipgloss.JoinHorizontal(lipgloss.Top, preview, "  ", tips)
 	}
 	b.WriteString(previewStyle.Width(m.width).Render(preview))
+	// Key hints live on the last line: they are reference material, and the
+	// top of the screen is where the session list belongs.
+	b.WriteString("\n" + helpStyle.Render(helpLine))
 	return b.String()
 }
 

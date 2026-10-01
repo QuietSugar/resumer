@@ -2,13 +2,14 @@ package claudecode
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 func fixtureRoot(t *testing.T) string {
@@ -20,6 +21,36 @@ func fixtureRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return abs
+}
+
+// copyTree copies a fixture into a temp directory so a test can mutate it
+// without touching what `go test ./...` reads.
+func copyTree(t *testing.T, src, dst string) {
+	t.Helper()
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(src, path)
+		if rerr != nil {
+			return rerr
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func listAll(t *testing.T) map[string]session.Session {
@@ -214,5 +245,76 @@ func TestLongLineSurvivesParsing(t *testing.T) {
 	}
 	if s.LastPrompt != "after the big line" {
 		t.Errorf("line after the 200KB one was lost: %q", s.LastPrompt)
+	}
+}
+
+// TestNoTimeFilterByDefault locks in the CLI default: Days == 0 (the zero
+// value) must impose no time limit. The fixtures are dated 2026-04-15, far
+// outside any recent window, so a stale default would silently drop them all.
+func TestNoTimeFilterByDefault(t *testing.T) {
+	t.Setenv("RESUMER_CLAUDE_PROJECT_ROOT", fixtureRoot(t))
+	p := New()
+	sessions, err := p.ListSessions(session.Filters{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 5 {
+		t.Fatalf("zero-value filter listed %d sessions, want 5 (no time limit)", len(sessions))
+	}
+}
+
+// Sub-agent traffic lands in the same file as the main conversation, flagged
+// with isSidechain. It is not part of this session, so it must not inflate the
+// prompt list, the assistant-turn estimate, or the activity window.
+func TestSidechainRecordsDoNotCount(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "claude-code")
+	copyTree(t, fixtureRoot(t), root)
+
+	target := filepath.Join(root, "-fixture-alpha", "aaaaaaaa-0001-4000-8000-000000000001.jsonl")
+	f, err := os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Timestamps after the session's own last record, so a leak would also
+	// move the activity window.
+	sidechain := `{"type":"user","timestamp":"2026-04-15T02:00:00.000Z","isSidechain":true,"message":{"role":"user","content":"SUBAGENT PROMPT MUST NOT COUNT"}}
+{"type":"assistant","timestamp":"2026-04-15T02:00:05.000Z","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"subagent reply"}]}}
+`
+	if _, err := f.WriteString(sidechain); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("RESUMER_CLAUDE_PROJECT_ROOT", root)
+	p := New()
+	sessions, err := p.ListSessions(session.Filters{AllTime: true, Days: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var one *session.Session
+	for i := range sessions {
+		if sessions[i].SessionID == "aaaaaaaa-0001-4000-8000-000000000001" {
+			one = &sessions[i]
+		}
+	}
+	if one == nil {
+		t.Fatal("session aaaaaaaa-0001 missing")
+	}
+	if len(one.Prompts) != 2 {
+		t.Errorf("prompts = %d, want 2 — a sidechain user record was counted", len(one.Prompts))
+	}
+	if one.AsstCount != 2 {
+		t.Errorf("asst count = %d, want 2 — a sidechain assistant record was counted", one.AsstCount)
+	}
+	if one.LastTS != "2026-04-15T01:05:07.000Z" {
+		t.Errorf("last ts = %q, want the main session's own 2026-04-15T01:05:07.000Z", one.LastTS)
+	}
+	for _, pr := range one.Prompts {
+		if strings.Contains(pr.Text, "SUBAGENT") {
+			t.Errorf("sidechain prompt leaked into the prompt list: %q", pr.Text)
+		}
 	}
 }

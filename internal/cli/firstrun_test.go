@@ -60,7 +60,7 @@ func TestPresentBinPrintsAndCreatesSentinel(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", tmp)
 	t.Setenv("PATH", fakeBinDir(t))
 	out := captureStderr(t, func() { maybeShowFirstRunStar("claude") })
-	if !strings.Contains(out, "⭐") || !strings.Contains(out, "github.com/jin-ttao/resumer") {
+	if !strings.Contains(out, "⭐") || !strings.Contains(out, "github.com/QuietSugar/resumer") {
 		t.Errorf("star message missing: %q", out)
 	}
 	sentinel := filepath.Join(tmp, "resumer", "first-run-done")

@@ -11,13 +11,13 @@ back in the conversation.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jin-ttao/resumer/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/QuietSugar/resumer/main/install.sh | sh
 ```
 
 or with Go:
 
 ```bash
-go install github.com/jin-ttao/resumer@latest
+go install github.com/QuietSugar/resumer@latest
 ```
 
 macOS & Linux (arm64/amd64). Windows is on the roadmap.
@@ -26,15 +26,19 @@ macOS & Linux (arm64/amd64). Windows is on the roadmap.
 
 ```bash
 resumer              # interactive picker
-resumer list         # plain list, last 7 days
+resumer list         # plain list, every session
 resumer --help       # everything else
 ```
 
 Picker keys: `↑↓` browse · `/` filter · `tab` cycle source · `ctrl-s` toggle sort ·
-`enter` resume · `esc` cancel.
+`enter` resume · `esc` cancel. They are listed on the last line of the
+screen. The session list carries a one-line column header (`age` `src`
+`project` `title`) so the fixed-width rows are self-describing.
 
-Useful flags (both picker and `list`): `--days N`, `--date YYYY-MM-DD`, `--all`,
-`--project foo`, `--source claude-code|codebuddy|codex|kimi-code|opencode`, `--limit N`. List mode adds
+Useful flags (both picker and `list`): `--days N` (narrow to the last N days —
+**the default is no time limit, so every session is listed**), `--date YYYY-MM-DD`,
+`--all` (kept for compatibility; it is now the default), `--project foo`,
+`--source claude-code|codebuddy|codex|kimi-code|opencode`, `--limit N`. List mode adds
 `--json` and `--full [N]`. The `asst_count` JSON field and detail-preview
 assistant activity figure are provider-specific rough size estimates; counting
 rules differ and the values are not exact or directly comparable across providers.
@@ -96,11 +100,27 @@ resumer also fixes a real-world annoyance: when a session's stored cwd has gone
 stale (iCloud/Obsidian path drift), it re-derives the correct project directory
 from the session file location, so `claude --resume` actually works.
 
+When a session's working directory has been deleted — the project was renamed,
+moved, or removed, or the session data was carried to another machine — that
+session cannot be resumed. resumer replaces the project column with
+`(deleted)` in both `resumer list` and the picker, and refuses to launch the
+agent CLI on Enter, printing the missing path and the command that unblocks it
+instead of the CLI's own opaque `created under a different directory` error:
+
+```
+error: cannot resume [kimi-code] <session id> — its working directory has been deleted:
+       /home/xu/git-repo/my-project
+       the agent CLI cannot start there, so resumer did not run the resume command.
+       to resume this session, recreate the directory first:
+         mkdir -p "/home/xu/git-repo/my-project"
+       then run resumer again and select this session.
+```
+
 <details>
 <summary>Development</summary>
 
 ```bash
-git clone https://github.com/jin-ttao/resumer.git
+git clone https://github.com/QuietSugar/resumer.git
 cd resumer
 go build -o resumer .
 ./tests/run-qa.sh --no-vhs   # go vet + full test suite (no external deps)
@@ -118,4 +138,4 @@ Roadmap: Gemini provider · Windows support.
 
 ---
 
-Built by [@jin-ttao](https://github.com/jin-ttao). If this helped, leaving a ⭐ helps others find it.
+MIT © 2026 Jintae Song · QuietSugar — see [LICENSE](LICENSE).

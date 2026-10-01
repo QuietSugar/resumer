@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 // Provider is the contract each AI-CLI session source implements.

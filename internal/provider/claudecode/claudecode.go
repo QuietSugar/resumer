@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/textutil"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 const envProjectRoot = "RESUMER_CLAUDE_PROJECT_ROOT"
@@ -142,8 +142,11 @@ type record struct {
 	Snapshot  *struct {
 		Timestamp string `json:"timestamp"`
 	} `json:"snapshot"`
-	Cwd         string          `json:"cwd"`
-	Subtype     string          `json:"subtype"`
+	Cwd     string `json:"cwd"`
+	Subtype string `json:"subtype"`
+	// IsSidechain marks records a sub-agent wrote into this session's file.
+	// They are not part of the main conversation.
+	IsSidechain bool            `json:"isSidechain"`
 	Content     json.RawMessage `json:"content"`
 	Message     json.RawMessage `json:"message"`
 	CustomTitle string          `json:"customTitle"`
@@ -197,6 +200,12 @@ func (p *Provider) parseJSONL(path string) *session.Session {
 	for sc.Scan() {
 		var r record
 		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
+			continue
+		}
+		if r.IsSidechain {
+			// Sub-agent traffic shares the file but is not this session's
+			// conversation: counting it would inflate the prompt list, the
+			// assistant-turn estimate, and the activity window.
 			continue
 		}
 		ts := r.Timestamp
@@ -361,10 +370,11 @@ func touchesDate(s *session.Session, day time.Time) bool {
 	return !(ls.Before(start) || fs_.After(end))
 }
 
-// cutoffForFilters: local midnight minus N days (provider default 3 when the
-// CLI left Days unset). Nil when --all or --date is in play.
+// cutoffForFilters: local midnight minus N days. Nil when there is no time
+// window at all — --all, --date, or the CLI default of "no limit" (Days == 0)
+// — so every parsed session is kept.
 func cutoffForFilters(f session.Filters) *time.Time {
-	if f.AllTime || f.Date != "" {
+	if f.AllTime || f.Date != "" || f.Days == 0 {
 		return nil
 	}
 	days := f.Days

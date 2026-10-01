@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jin-ttao/resumer/internal/config"
-	"github.com/jin-ttao/resumer/internal/provider"
+	"github.com/QuietSugar/resumer/internal/config"
+	"github.com/QuietSugar/resumer/internal/provider"
 )
 
 func TestNormalizeSubcommands(t *testing.T) {

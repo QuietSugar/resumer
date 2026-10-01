@@ -14,17 +14,18 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"github.com/jin-ttao/resumer/internal/config"
-	"github.com/jin-ttao/resumer/internal/execres"
-	"github.com/jin-ttao/resumer/internal/provider"
-	"github.com/jin-ttao/resumer/internal/provider/claudecode"
-	"github.com/jin-ttao/resumer/internal/provider/codebuddy"
-	"github.com/jin-ttao/resumer/internal/provider/codex"
-	"github.com/jin-ttao/resumer/internal/provider/kimi"
-	"github.com/jin-ttao/resumer/internal/provider/opencode"
-	"github.com/jin-ttao/resumer/internal/render"
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/tui"
+	"github.com/QuietSugar/resumer/internal/config"
+	"github.com/QuietSugar/resumer/internal/cwd"
+	"github.com/QuietSugar/resumer/internal/execres"
+	"github.com/QuietSugar/resumer/internal/provider"
+	"github.com/QuietSugar/resumer/internal/provider/claudecode"
+	"github.com/QuietSugar/resumer/internal/provider/codebuddy"
+	"github.com/QuietSugar/resumer/internal/provider/codex"
+	"github.com/QuietSugar/resumer/internal/provider/kimi"
+	"github.com/QuietSugar/resumer/internal/provider/opencode"
+	"github.com/QuietSugar/resumer/internal/render"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/tui"
 )
 
 func registerProviders() {
@@ -50,7 +51,7 @@ Unified AI CLI session resumer.
 
 options:
   --source NAME    limit to a single provider (claude-code | codebuddy | codex | kimi-code | opencode)
-  --days N         only show sessions active in the last N days (default: 7)
+  --days N         only show sessions active in the last N days (default: no limit)
   --date DATE      YYYY-MM-DD — only sessions active on this date
   --all            no time filter
   --project STR    substring match against project name
@@ -129,7 +130,7 @@ func Run(argv []string, version string) int {
 	var (
 		showVersion = fs.Bool("version", false, "print version")
 		source      = fs.String("source", "", "limit to a single provider")
-		days        = fs.Int("days", 7, "window in days")
+		days        = fs.Int("days", 0, "only show sessions active in the last N days; 0 = no limit")
 		date        = fs.String("date", "", "YYYY-MM-DD")
 		all         = fs.Bool("all", false, "no time filter")
 		project     = fs.String("project", "", "project substring")
@@ -228,7 +229,7 @@ func runPicker(filters session.Filters) int {
 	}
 	if chosen == nil {
 		if empty {
-			fmt.Fprintln(os.Stderr, "No sessions found. Try --days 7 or --all.")
+			fmt.Fprintln(os.Stderr, "No sessions found. Try without --project/--date, or check `resumer provider list`.")
 		}
 		return 0
 	}
@@ -401,29 +402,40 @@ func providerNames() []string {
 	return out
 }
 
+// exitCannotResume is returned when a session's working directory is gone, so
+// the agent CLI would fail on its own with a "created under a different
+// directory" error that names neither the real cause nor the fix.
+const exitCannotResume = 3
+
+// reportMissingCwd explains the refusal and hands the user the one command
+// that unblocks it, ready to paste.
+func reportMissingCwd(s *session.Session, dir string) {
+	fmt.Fprintf(os.Stderr,
+		"error: cannot resume [%s] %s — its working directory has been deleted:\n",
+		s.Source, s.SessionID)
+	fmt.Fprintf(os.Stderr, "       %s\n", dir)
+	fmt.Fprintf(os.Stderr,
+		"       the agent CLI cannot start there, so resumer did not run the resume command.\n")
+	fmt.Fprintf(os.Stderr, "       to resume this session, recreate the directory first:\n")
+	fmt.Fprintf(os.Stderr, "         mkdir -p %q\n", dir)
+	fmt.Fprintf(os.Stderr, "       then run resumer again and select this session.\n")
+}
+
 // execResume chdirs into the session's directory and replaces the process
 // with the provider's resume command.
 //
-// For Claude Code and its CodeBuddy fork, prefer a cwd derived from the
-// session file's encoded parent directory. A stale stored cwd can make either
-// CLI fail to locate the project-local session.
+// When the resolved directory does not exist at all, resumer refuses instead
+// of exec'ing: the agent CLI would only report that the session "was created
+// under a different directory", which tells the user nothing about the real
+// problem or how to fix it.
 func execResume(s *session.Session) int {
-	targetCwd := ""
-	if s.Source == "claude-code" || s.Source == "codebuddy" {
-		targetCwd = claudecode.ResolveExecCwd(s.Path, s.Cwd)
+	targetCwd, ok := cwd.Resolve(s)
+	if !ok {
+		reportMissingCwd(s, targetCwd)
+		return exitCannotResume
 	}
-	if targetCwd == "" {
-		targetCwd = s.Cwd
-	}
-
 	if targetCwd != "" {
-		if st, err := os.Stat(targetCwd); err == nil && st.IsDir() {
-			_ = os.Chdir(targetCwd)
-		} else {
-			wd, _ := os.Getwd()
-			fmt.Fprintf(os.Stderr,
-				"warning: session cwd not accessible, running from %s: %s\n", wd, targetCwd)
-		}
+		_ = os.Chdir(targetCwd)
 	}
 
 	if len(s.ResumeArgv) == 0 {

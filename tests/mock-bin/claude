@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mock claude binary for cc-resume QA.
+# Mock claude binary for resumer QA.
 # Records invocation (pwd + args) into a log, then exits.
 LOG="${CLAUDE_MOCK_LOG:-/tmp/resumer-qa/claude-mock.log}"
 mkdir -p "$(dirname "$LOG")"

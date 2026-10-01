@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 func mk(last, source, path string) session.Session {

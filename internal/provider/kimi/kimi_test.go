@@ -1,12 +1,42 @@
 package kimi
 
 import (
+	"io/fs"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/session"
 )
+
+// copyTree copies a fixture into a temp directory so a test can mutate it
+// without touching what `go test ./...` reads.
+func copyTree(t *testing.T, src, dst string) error {
+	t.Helper()
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(src, path)
+		if rerr != nil {
+			return rerr
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+}
 
 func fixtureDir(t *testing.T, parts ...string) string {
 	t.Helper()
@@ -250,5 +280,124 @@ func TestNormalizeTS(t *testing.T) {
 		if got := normalizeTS(in); got != want {
 			t.Errorf("normalizeTS(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestNoTimeFilterByDefault locks in the CLI default: Days == 0 (the zero
+// value) must impose no time limit. The fixtures are dated 2026-04-15, far
+// outside any recent window, so a stale default would silently drop them all.
+func TestNoTimeFilterByDefault(t *testing.T) {
+	t.Setenv(envKimiHome, fixtureDir(t, "kimi-home"))
+	p := New()
+	sessions, err := p.ListSessions(session.Filters{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 4 {
+		t.Fatalf("zero-value filter listed %d sessions, want 4 (no time limit)", len(sessions))
+	}
+}
+
+// kimi flags archived sessions in state.json and keeps them out of its own
+// session picker, so resumer must not list or load them either. The session
+// directory and its wire stream stay on disk.
+func TestArchivedSessionNotListed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kimi-home")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(t, fixtureDir(t, "kimi-home"), root); err != nil {
+		t.Fatal(err)
+	}
+
+	// Archive one of the four fixture sessions in place.
+	archived := filepath.Join(root, "sessions", "*kimi-one_*", "*", "state.json")
+	matches, err := filepath.Glob(archived)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("fixture session state.json: %v (%v)", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(data), `"archived":false`, `"archived":true`, 1)
+	if updated == string(data) {
+		t.Fatal("fixture state.json has no archived flag to flip")
+	}
+	if err := os.WriteFile(matches[0], []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("RESUMER_KIMI_HOME", root)
+	p := New()
+	sessions, err := p.ListSessions(session.Filters{AllTime: true, Days: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 3 {
+		t.Fatalf("listed %d sessions, want 3 (one archived session skipped)", len(sessions))
+	}
+	for _, s := range sessions {
+		if s.SessionID == "dddd0001-1111-7000-8000-000000000001" {
+			t.Error("archived session was listed")
+		}
+	}
+
+	// It must not be loadable as a detail either.
+	if d, err := p.LoadDetail("dddd0001-1111-7000-8000-000000000001"); err != nil || d != nil {
+		t.Errorf("LoadDetail(archived) = %v, %v; want nil, nil", d, err)
+	}
+}
+
+// Older kimi-code builds wrote an ISO string into the same camelCase
+// createdAt/updatedAt fields that current builds fill with epoch-ms numbers, and
+// they wrote no session_index.jsonl entry at all. Both facts must survive: the
+// timestamps normalize, and the recorded workDir still resolves the cwd and
+// project label instead of falling through to "(unknown)".
+func TestISOTimestampsAndWorkDirParsed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kimi-iso-home")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(t, fixtureDir(t, "kimi-iso-home"), root); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RESUMER_KIMI_HOME", root)
+
+	p := New()
+	all, err := p.ListSessions(session.Filters{AllTime: true, Days: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("listed %d sessions, want 1", len(all))
+	}
+	s := all[0]
+
+	const wantCwd = "/home/xu/git-repo/git.sunmay.hall/cu/deploy"
+	if s.Cwd != wantCwd {
+		t.Errorf("cwd = %q, want %q", s.Cwd, wantCwd)
+	}
+	if s.ProjectLabel != "deploy" {
+		t.Errorf("project label = %q, want %q", s.ProjectLabel, "deploy")
+	}
+	// ISO timestamps are passed through as written (same convention as the
+	// snake_case created_at/updated_at path), milliseconds included.
+	if s.FirstTS != "2026-07-25T04:21:32.410Z" {
+		t.Errorf("first ts = %q, want the state.json createdAt", s.FirstTS)
+	}
+	if s.LastTS != "2026-07-25T04:26:10.000Z" {
+		t.Errorf("last ts = %q, want the state.json updatedAt", s.LastTS)
+	}
+	// The wire stream in this fixture carries no timestamps, so the values above
+	// can only have come from state.json.
+	if s.Title != "我想将此项目做成 Skill" {
+		t.Errorf("title = %q, want the state.json title (not the wire fallback)", s.Title)
+	}
+	if len(s.Prompts) != 2 || s.AsstCount != 2 {
+		t.Errorf("prompts/asst = %d/%d, want 2/2", len(s.Prompts), s.AsstCount)
+	}
+	if s.FirstPrompt != "旧版会话的第一个提示" || s.LastPrompt != "旧版会话的第二个提示" {
+		t.Errorf("prompts = %q / %q", s.FirstPrompt, s.LastPrompt)
 	}
 }

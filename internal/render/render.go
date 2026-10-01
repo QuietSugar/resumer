@@ -9,8 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/textutil"
+	"github.com/QuietSugar/resumer/internal/cwd"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 const ansiReset = "\x1b[0m"
@@ -73,7 +74,11 @@ func Index(sessions []session.Session) string {
 		s := &sessions[i]
 		last := textutil.PadDisplay(FmtLastShort(s.LastTS), 17)
 		badge := Badge(s.Source, BadgeANSI[s.Source])
-		proj := textutil.PadDisplay(textutil.TrimDisplay(s.ProjectLabel, 25), 25)
+		projLabel := s.ProjectLabel
+		if cwd.Missing(s) {
+			projLabel = textutil.DirDeletedLabel
+		}
+		proj := textutil.PadDisplay(textutil.TrimDisplay(projLabel, 25), 25)
 		msgs := s.AsstCount + len(s.Prompts)
 		markers := textutil.VolumeMarker(msgs) + "  "
 		first := textutil.TrimDisplay(s.FirstPrompt, FirstPromptWidth)
@@ -101,9 +106,12 @@ func FullBox(s *session.Session) string {
 	add := func(format string, a ...any) {
 		lines = append(lines, fmt.Sprintf(format, a...))
 	}
-	cwd := s.Cwd
-	if cwd == "" {
-		cwd = "(none)"
+	dir := s.Cwd
+	switch {
+	case dir == "":
+		dir = "(none)"
+	case cwd.Missing(s):
+		dir += "  (directory no longer exists — recreate it before resuming)"
 	}
 	add("│ source:         [%s]", s.Source)
 	add("│ 📁 project:     %s", s.ProjectLabel)
@@ -111,7 +119,7 @@ func FullBox(s *session.Session) string {
 	add("│ started:        %s", textutil.FmtTS(s.FirstTS, true))
 	add("│ last activity:  %s", textutil.FmtTS(s.LastTS, true))
 	add("│ duration:       %s", textutil.FmtDuration(s.FirstTS, s.LastTS))
-	add("│ cwd:            %s", cwd)
+	add("│ cwd:            %s", dir)
 	add("│ activity:       %d user prompts / ~%d assistant activity", len(s.Prompts), s.AsstCount)
 	if s.Title != "" {
 		add("│ title:          %s", s.Title)

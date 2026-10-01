@@ -35,8 +35,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/textutil"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 const (
@@ -397,32 +397,58 @@ func earlierTS(a, b string) string {
 }
 
 type stateMeta struct {
-	Title      string      `json:"title"`
-	LastPrompt string      `json:"lastPrompt"`
-	CreatedAt  json.Number `json:"createdAt"` // epoch ms (real kimi-code form)
-	UpdatedAt  json.Number `json:"updatedAt"`
-	CreatedAlt string      `json:"created_at"` // ISO fallback form
-	UpdatedAlt string      `json:"updated_at"`
-	ForkedFrom string      `json:"forkedFrom"`
-	ForkedAlt  string      `json:"forked_from"`
-	Cwd        string      `json:"cwd"`
-	WorkDir    string      `json:"workDir"`
+	Title      string `json:"title"`
+	LastPrompt string `json:"lastPrompt"`
+	// CreatedAt/UpdatedAt are epoch-ms numbers in current kimi-code, but older
+	// builds wrote an ISO string into the same camelCase field. RawMessage keeps
+	// either form decodable: declaring json.Number makes a string value fail
+	// that field (and only that field) and lose the timestamp.
+	CreatedAt  json.RawMessage `json:"createdAt"`
+	UpdatedAt  json.RawMessage `json:"updatedAt"`
+	CreatedAlt string          `json:"created_at"` // ISO fallback form
+	UpdatedAlt string          `json:"updated_at"`
+	ForkedFrom string          `json:"forkedFrom"`
+	ForkedAlt  string          `json:"forked_from"`
+	Cwd        string          `json:"cwd"`
+	WorkDir    string          `json:"workDir"`
+	// Archived marks a session kimi has put away. kimi keeps the directory
+	// and its wire stream on disk but leaves archived sessions out of its
+	// own session picker, so resumer must not offer them either.
+	Archived bool `json:"archived"`
 }
 
-// metaTS resolves state.json timestamps: epoch-ms number first, then ISO
-// string fallback.
-func metaTS(n json.Number, iso string) string {
-	if n != "" {
-		if ts := normalizeTS(n.String()); ts != "" {
+// metaTS resolves state.json timestamps: the camelCase field (epoch-ms number
+// or ISO string) first, then the snake_case ISO fallback.
+func metaTS(raw json.RawMessage, iso string) string {
+	if s := rawText(raw); s != "" {
+		if ts := normalizeTS(s); ts != "" {
 			return ts
 		}
 	}
 	return normalizeTS(iso)
 }
 
+// rawText renders a RawMessage as plain text: a JSON number as-is, a JSON
+// string unquoted. Anything else (object, array, null, empty) yields "".
+func rawText(raw json.RawMessage) string {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return ""
+	}
+	if strings.HasPrefix(s, `"`) {
+		var out string
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return ""
+		}
+		return out
+	}
+	return s
+}
+
 // parseSessionDir reads one session directory (state.json + main wire.jsonl).
-// Returns nil when state.json is missing/unreadable — a directory without it
-// is not a session.
+// Returns nil when the directory is not a listable session: state.json is
+// missing/unreadable (a directory without it is not a session), or state.json
+// marks the session archived.
 func (p *Provider) parseSessionDir(dir string) *session.Session {
 	sessionID := filepath.Base(dir)
 
@@ -432,6 +458,9 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 	}
 	var state stateMeta
 	_ = json.Unmarshal(stateData, &state)
+	if state.Archived {
+		return nil
+	}
 
 	createdAt := metaTS(state.CreatedAt, state.CreatedAlt)
 	updatedAt := metaTS(state.UpdatedAt, state.UpdatedAlt)
@@ -645,10 +674,11 @@ func touchesDate(s *session.Session, day time.Time) bool {
 	return !(ls.Before(start) || fs_.After(end))
 }
 
-// cutoffForFilters: local midnight minus N days (provider default 3 when the
-// CLI left Days unset). Nil when --all or --date is in play.
+// cutoffForFilters: local midnight minus N days. Nil when there is no time
+// window at all — --all, --date, or the CLI default of "no limit" (Days == 0)
+// — so every parsed session is kept.
 func cutoffForFilters(f session.Filters) *time.Time {
-	if f.AllTime || f.Date != "" {
+	if f.AllTime || f.Date != "" || f.Days == 0 {
 		return nil
 	}
 	days := f.Days

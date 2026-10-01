@@ -1,10 +1,12 @@
 package render
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 func TestFullBoxShowsFirstPromptWhenPromptListIsEmpty(t *testing.T) {
@@ -38,5 +40,39 @@ func TestRenderersOmitTokenAndCacheStatistics(t *testing.T) {
 		if strings.Contains(lower, "token") || strings.Contains(lower, "cache hit") {
 			t.Errorf("render output still contains usage statistics:\n%s", output)
 		}
+	}
+}
+
+func TestRenderersFlagMissingWorkingDirectory(t *testing.T) {
+	gone := session.Session{
+		Source: "kimi-code", SessionID: "s1", ProjectLabel: "old-project",
+		Cwd: filepath.Join(t.TempDir(), "deleted-project"), FirstPrompt: "hello",
+	}
+	idx := Index([]session.Session{gone})
+	// The project column must say the directory is gone, not pass the stale
+	// name off as a live project.
+	if !strings.Contains(idx, textutil.DirDeletedLabel) {
+		t.Errorf("index row should mark the deleted directory:\n%s", idx)
+	}
+	if strings.Contains(idx, "old-project") {
+		t.Errorf("index row should not show the stale project name:\n%s", idx)
+	}
+	box := FullBox(&gone)
+	if !strings.Contains(box, "directory no longer exists") {
+		t.Errorf("detail box should mark the deleted directory:\n%s", box)
+	}
+	if !strings.Contains(box, gone.Cwd) {
+		t.Errorf("detail box should still show the missing path:\n%s", box)
+	}
+
+	alive := session.Session{
+		Source: "kimi-code", SessionID: "s2", ProjectLabel: "live-project",
+		Cwd: t.TempDir(), FirstPrompt: "hello",
+	}
+	if idx := Index([]session.Session{alive}); strings.Contains(idx, textutil.DirDeletedLabel) {
+		t.Errorf("a session whose cwd exists must not be flagged:\n%s", idx)
+	}
+	if box := FullBox(&alive); strings.Contains(box, "directory no longer exists") {
+		t.Errorf("a session whose cwd exists must not be flagged:\n%s", box)
 	}
 }

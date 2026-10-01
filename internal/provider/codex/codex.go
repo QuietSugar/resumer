@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/textutil"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 const (
@@ -246,8 +246,11 @@ func findRolloutFiles(root string) []string {
 	return out
 }
 
+// cutoffForFilters: local midnight minus N days. Nil when there is no time
+// window at all — --all, --date, or the CLI default of "no limit" (Days == 0)
+// — so every parsed session is kept.
 func cutoffForFilters(f session.Filters) *time.Time {
-	if f.AllTime || f.Date != "" {
+	if f.AllTime || f.Date != "" || f.Days == 0 {
 		return nil
 	}
 	days := f.Days

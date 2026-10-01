@@ -31,9 +31,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/sqliteread"
-	"github.com/jin-ttao/resumer/internal/textutil"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/sqliteread"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 const (
@@ -288,6 +288,9 @@ func projectLabel(dir string) string {
 	return "(unknown)"
 }
 
+// readSQLite returns the visible sessions from the database: root sessions
+// that are neither archived (time_archived set) nor a child/subagent session
+// (parent_id set).
 func (p *Provider) readSQLite(path string) ([]session.Session, error) {
 	db, err := sqliteread.Open(path)
 	if err != nil {
@@ -446,31 +449,23 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 	return out, nil
 }
 
-// listRaw returns every visible session, SQLite-first, merged with any
-// legacy JSON-only sessions (deduped by ID; SQLite wins).
+// listRaw returns every visible session.
+//
+// The SQLite database is the only source of truth whenever it exists. opencode
+// empties storage/session/ when it moves to the database, so a JSON file left
+// beside a database is a leftover of a session the user deleted or archived
+// there — reading it would resurrect that session, which is exactly what must
+// not happen. The JSON store is therefore only a fallback for installs that
+// predate the database.
 func (p *Provider) listRaw() ([]session.Session, error) {
-	var out []session.Session
-	seen := map[string]bool{}
 	if path := dbPath(); path != "" {
 		ss, err := p.readSQLite(path)
 		if err != nil {
 			return nil, fmt.Errorf("opencode db %s: %w", path, err)
 		}
-		for _, s := range ss {
-			seen[s.SessionID] = true
-		}
-		out = append(out, ss...)
+		return ss, nil
 	}
-	js, err := p.readJSON()
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range js {
-		if !seen[s.SessionID] {
-			out = append(out, s)
-		}
-	}
-	return out, nil
+	return p.readJSON()
 }
 
 func touchesDate(s *session.Session, day time.Time) bool {
@@ -490,10 +485,11 @@ func touchesDate(s *session.Session, day time.Time) bool {
 	return !(ls.Before(start) || fs_.After(end))
 }
 
-// cutoffForFilters: local midnight minus N days (provider default 3 when the
-// CLI left Days unset). Nil when --all or --date is in play.
+// cutoffForFilters: local midnight minus N days. Nil when there is no time
+// window at all — --all, --date, or the CLI default of "no limit" (Days == 0)
+// — so every parsed session is kept.
 func cutoffForFilters(f session.Filters) *time.Time {
-	if f.AllTime || f.Date != "" {
+	if f.AllTime || f.Date != "" || f.Days == 0 {
 		return nil
 	}
 	days := f.Days

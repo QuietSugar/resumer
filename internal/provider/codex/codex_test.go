@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/jin-ttao/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/session"
 )
 
 func fixtureDir(t *testing.T, parts ...string) string {
@@ -122,5 +122,22 @@ func TestDateFilter(t *testing.T) {
 	}
 	if len(on) != 3 {
 		t.Errorf("on-day date filter: got %d, want 3", len(on))
+	}
+}
+
+// TestNoTimeFilterByDefault locks in the CLI default: Days == 0 (the zero
+// value) must impose no time limit. The rollout filenames are dated
+// 2026-04-15, far outside any recent window, so a stale default would skip
+// them via the filename pre-filter.
+func TestNoTimeFilterByDefault(t *testing.T) {
+	t.Setenv("RESUMER_CODEX_SESSION_ROOT", fixtureDir(t, "codex"))
+	t.Setenv("RESUMER_CODEX_INDEX_FILE", fixtureDir(t, "codex", "session_index.jsonl"))
+	p := New()
+	sessions, err := p.ListSessions(session.Filters{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 3 {
+		t.Fatalf("zero-value filter listed %d sessions, want 3 (no time limit)", len(sessions))
 	}
 }

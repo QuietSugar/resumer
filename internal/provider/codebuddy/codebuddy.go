@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jin-ttao/resumer/internal/session"
-	"github.com/jin-ttao/resumer/internal/textutil"
+	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 const maxLineBytes = 10 << 20
@@ -61,6 +61,9 @@ type record struct {
 	Topic       string          `json:"topic"`
 	CustomTitle string          `json:"customTitle"`
 	AITitle     string          `json:"aiTitle"`
+	// IsSidechain marks records a sub-agent wrote into this session's file.
+	// They are not part of the main conversation.
+	IsSidechain bool            `json:"isSidechain"`
 	Content     json.RawMessage `json:"content"`
 	Message     json.RawMessage `json:"message"`
 }
@@ -142,6 +145,12 @@ func parseJSONL(path string) *session.Session {
 	for sc.Scan() {
 		var r record
 		if json.Unmarshal(sc.Bytes(), &r) != nil {
+			continue
+		}
+		if r.IsSidechain {
+			// Sub-agent traffic shares the file but is not this session's
+			// conversation: counting it would inflate the prompt list, the
+			// assistant-turn estimate, and the activity window.
 			continue
 		}
 		ts := parseTimestamp(r.Timestamp)
@@ -270,7 +279,7 @@ func findSessionFiles(root string) []string {
 }
 
 func cutoff(f session.Filters, now time.Time) *time.Time {
-	if f.AllTime || f.Date != "" {
+	if f.AllTime || f.Date != "" || f.Days == 0 {
 		return nil
 	}
 	days := f.Days
