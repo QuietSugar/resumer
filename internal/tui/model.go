@@ -1,6 +1,6 @@
-// Package tui is the native session picker (bubbletea), replacing the old
-// fzf integration. Layout mirrors the fzf setup: session list on top,
-// detail-box preview pane below.
+// Package tui is the native session picker (bubbletea): a three-panel
+// dashboard — top bar with provider tabs, collapsible workspace sidebar,
+// full-height session list, and a detail panel.
 //
 // The picker never execs: it quits with a selection recorded, and the CLI
 // performs the exec after the terminal is restored.
@@ -10,34 +10,26 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/sahilm/fuzzy"
 
-	"github.com/QuietSugar/resumer/internal/cwd"
+	"github.com/QuietSugar/resumer/internal/config"
 	"github.com/QuietSugar/resumer/internal/provider"
 	"github.com/QuietSugar/resumer/internal/render"
 	"github.com/QuietSugar/resumer/internal/session"
-	"github.com/QuietSugar/resumer/internal/textutil"
 	"github.com/QuietSugar/resumer/internal/workspace"
 )
 
-const helpLine = "↑↓ browse · / filter · tab source · ctrl-s sort · ctrl-r rescan · enter resume · esc cancel"
+type focus int
 
-var (
-	headerStyle  = lipgloss.NewStyle().Bold(true)
-	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	previewStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), true, false, false, false).
-			BorderForeground(lipgloss.Color("8"))
-	tipsStyle = lipgloss.NewStyle().
-			PaddingLeft(1).
-			Border(lipgloss.NormalBorder(), false, false, false, true).
-			BorderForeground(lipgloss.Color("8"))
+const (
+	focusList focus = iota
+	focusSidebar
 )
 
 type loadedMsg struct {
@@ -51,68 +43,75 @@ type loadedMsg struct {
 type Model struct {
 	filters   session.Filters
 	providers []provider.Provider
+	all       []session.Session
 
-	list    list.Model
+	tabs   []string // "" = all sources, then enabled provider names
+	tabIdx int
+
+	width, height int
+	ready, sized  bool
+
+	sidebarOn, previewOn bool
+	focus                focus
+	sideCur              int
+	wsFilter             string // group key of the workspace the sidebar filters by
+
+	grouped bool // group-mode rows (default: on; g toggles the flat list)
+
+	cursor, offset int
+	filtering      bool
+	filterInput    textinput.Model
+	filterValue    string
+
 	preview viewport.Model
+	detail  viewport.Model // full-detail popup content
 	spin    spinner.Model
 
-	all        []session.Session
-	sources    []string // "" = all, else provider name
-	sourceIdx  int
-	sortAsc    bool
-	pending    int
-	generation int
-	loaded     bool
-	warnings   []string
+	lastV time.Time // double-tap detection for the full-detail popup
 
-	// selectable holds the list indices of session rows (group-header rows are
-	// not selectable). It is only valid while the list is unfiltered.
+	modal    modalKind
+	provCur  int
+	provTemp map[string]bool
+
+	pending, generation int
+	loaded, noSessions  bool
+	warnings            []string
+
+	rows       []row
 	selectable []int
+	groups     []workspace.Group
+	tabCounts  map[string]int
 	workspaces int
 
-	// pendingSelect/pendingID/pendingSrc remember the selection to restore once
-	// an active filter's new match set has been applied (SetItems defers it).
-	pendingSelect bool
-	pendingID     string
-	pendingSrc    string
-
-	selected   *session.Session
-	noSessions bool
-	width      int
-	height     int
-	tipsWidth  int
-	customTips string
-	ready      bool
+	selKey   string
+	selected *session.Session
 }
 
 // NewModel builds the picker over the given providers (already filtered to
 // active / requested-source ones by the caller).
 func NewModel(providers []provider.Provider, filters session.Filters) Model {
-	l := list.New(nil, rowDelegate{}, 0, 0)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetShowHelp(false)
-	l.SetFilteringEnabled(true)
-	l.DisableQuitKeybindings()
+	ti := textinput.New()
+	ti.Placeholder = "filter sessions…"
+	ti.Prompt = "/"
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
-	sources := []string{""}
+	m := Model{
+		filters:     filters,
+		providers:   providers,
+		grouped:     true,
+		tabs:        []string{""},
+		filterInput: ti,
+		preview:     viewport.New(0, 0),
+		spin:        sp,
+		provTemp:    map[string]bool{},
+		pending:     len(providers),
+	}
 	for _, p := range providers {
-		sources = append(sources, p.Name())
+		m.tabs = append(m.tabs, p.Name())
 	}
-
-	return Model{
-		filters:    filters,
-		providers:  providers,
-		list:       l,
-		preview:    viewport.New(0, 0),
-		spin:       sp,
-		sources:    sources,
-		pending:    len(providers),
-		customTips: loadCustomTips(),
-	}
+	return m
 }
 
 // Selected returns the chosen session (nil on cancel).
@@ -121,141 +120,143 @@ func (m Model) Selected() *session.Session { return m.selected }
 // NoSessions reports whether loading finished with zero sessions.
 func (m Model) NoSessions() bool { return m.noSessions }
 
-func (m Model) scanCmds() []tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(m.providers))
-	for _, p := range m.providers {
-		p := p
-		f, generation := m.filters, m.generation
-		cmds = append(cmds, func() tea.Msg {
-			ss, err := p.ListSessions(f)
-			return loadedMsg{generation: generation, name: p.Name(), sessions: ss, err: err}
-		})
+// --- data pipeline ---------------------------------------------------------
+
+// tabSessions returns the sessions of the active provider tab (before any
+// sidebar/text filtering).
+func (m Model) tabSessions() []session.Session {
+	src := ""
+	if m.tabIdx > 0 && m.tabIdx < len(m.tabs) {
+		src = m.tabs[m.tabIdx]
 	}
-	return cmds
-}
-
-func (m Model) Init() tea.Cmd {
-	cmds := append([]tea.Cmd{m.spin.Tick}, m.scanCmds()...)
-	return tea.Batch(cmds...)
-}
-
-func (m *Model) currentSessions() []session.Session {
-	src := m.sources[m.sourceIdx]
 	var out []session.Session
 	for _, s := range m.all {
 		if src == "" || s.Source == src {
 			out = append(out, s)
 		}
 	}
-	provider.SortSessions(out, m.sortAsc)
 	return out
 }
 
-// applyItems rebuilds the list from the current sessions, grouping by
-// workspace, and restores the previous selection by identity. It returns the
-// list command that must be forwarded so an active filter is re-applied.
-func (m *Model) applyItems() tea.Cmd {
-	selectedID, selectedSource := "", ""
-	if selected, ok := m.list.SelectedItem().(sessionItem); ok {
-		selectedID, selectedSource = selected.s.SessionID, selected.s.Source
+// applyTextFilter narrows ss by the fuzzy filter value, preserving order.
+func applyTextFilter(ss []session.Session, query string) []session.Session {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ss
 	}
-	m.pendingSelect = selectedID != "" || selectedSource != ""
-	m.pendingID, m.pendingSrc = selectedID, selectedSource
+	targets := make([]string, len(ss))
+	for i := range ss {
+		targets[i] = filterValue(&ss[i])
+	}
+	matches := fuzzy.Find(query, targets)
+	idx := make([]int, 0, len(matches))
+	for _, mt := range matches {
+		idx = append(idx, mt.Index)
+	}
+	sort.Ints(idx)
+	out := make([]session.Session, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, ss[i])
+	}
+	return out
+}
 
-	sessions := m.currentSessions()
-	groups := workspace.GroupBy(sessions)
-	items := make([]list.Item, 0, len(sessions)+len(groups))
+// rebuild recomputes groups, rows, and the cursor from the current state.
+// It is the single funnel every mutation goes through, so grouping, the
+// sidebar, the tabs, and the selection can never disagree.
+func (m *Model) rebuild() {
+	base := m.tabSessions()
+	m.groups = workspace.GroupBy(base)
+	m.workspaces = len(m.groups)
+
+	m.tabCounts = map[string]int{"": len(m.all)}
+	for _, s := range m.all {
+		m.tabCounts[s.Source]++
+	}
+
+	if m.wsFilter != "" {
+		var f []session.Session
+		for _, s := range base {
+			if workspace.Key(&s) == m.wsFilter {
+				f = append(f, s)
+			}
+		}
+		base = f
+	}
+	base = applyTextFilter(base, m.filterValue)
+	provider.SortSessions(base, false)
+
+	m.rows = make([]row, 0, len(base)+1)
 	m.selectable = m.selectable[:0]
-	for _, g := range groups {
-		items = append(items, groupHeaderItem{
-			count:   len(g.Sessions),
-			path:    groupPath(g, pathBudget(m.width)),
-			deleted: len(g.Sessions) > 0 && cwd.Missing(&g.Sessions[0]),
-		})
-		for i := range g.Sessions {
-			m.selectable = append(m.selectable, len(items))
-			items = append(items, sessionItem{s: g.Sessions[i]})
+	if m.grouped {
+		for _, g := range workspace.GroupBy(base) {
+			m.rows = append(m.rows, row{kind: rowGroup, g: g})
+			for _, s := range g.Sessions {
+				m.selectable = append(m.selectable, len(m.rows))
+				m.rows = append(m.rows, row{kind: rowSession, s: s})
+			}
+		}
+	} else {
+		for _, s := range base {
+			m.selectable = append(m.selectable, len(m.rows))
+			m.rows = append(m.rows, row{kind: rowSession, s: s})
 		}
 	}
-	m.workspaces = len(groups)
-	cmd := m.list.SetItems(items)
-
-	// Unfiltered: VisibleItems is the item slice we just built, so selection can
-	// be restored now. Filtered: SetItems schedules a fresh fuzzy match, so the
-	// filtered index space is only valid once FilterMatchesMsg arrives — defer.
-	if m.list.FilterState() == list.Unfiltered {
-		m.restoreSelection(selectedID, selectedSource)
-		m.pendingSelect = false
-	}
-	return cmd
-}
-
-// pathBudget caps the workspace header's directory display, derived from the
-// terminal width so narrow terminals abbreviate harder.
-func pathBudget(width int) int {
-	if width <= 0 {
-		return 44
-	}
-	b := width * 2 / 5
-	if b < 24 {
-		return 24
-	}
-	if b > 56 {
-		return 56
-	}
-	return b
-}
-
-// groupPath renders a workspace header's directory, progressively abbreviated
-// to the given display budget, or the native id / placeholder when no directory
-// is known.
-func groupPath(g workspace.Group, budget int) string {
-	if g.Dir != "" {
-		return textutil.ShortenPath(g.Dir, budget)
-	}
-	if g.WorkspaceID != "" {
-		return g.WorkspaceID
-	}
-	return "(no workspace)"
-}
-
-// restoreSelection selects the session matching (id, src) in the list's current
-// (possibly filtered) index space, falling back to the first visible session.
-func (m *Model) restoreSelection(id, src string) {
-	for i, it := range m.list.VisibleItems() {
-		if si, ok := it.(sessionItem); ok && si.s.SessionID == id && si.s.Source == src {
-			m.list.Select(i)
-			m.refreshPreview()
-			return
-		}
-	}
-	m.selectFirstVisible()
-}
-
-// selectFirstVisible moves the cursor to the first selectable session row.
-func (m *Model) selectFirstVisible() {
-	items := m.list.VisibleItems()
-	for i, it := range items {
-		if _, ok := it.(sessionItem); ok {
-			m.list.Select(i)
-			m.refreshPreview()
-			return
-		}
-	}
-	if len(items) > 0 {
-		m.list.Select(0)
-	}
+	m.restoreSelection()
 	m.refreshPreview()
 }
 
-// moveCursor steps the selection by delta selectable rows, skipping headers.
+// restoreSelection puts the cursor back on the previously selected session
+// (matched by identity), else on the first session row.
+func (m *Model) restoreSelection() {
+	if m.selKey != "" {
+		for i, r := range m.rows {
+			if r.kind == rowSession && sessionKey(&r.s) == m.selKey {
+				m.cursor = i
+				m.clampOffset()
+				return
+			}
+		}
+	}
+	if len(m.selectable) > 0 {
+		m.cursor = m.selectable[0]
+	} else {
+		m.cursor = 0
+	}
+	m.clampOffset()
+}
+
+func (m *Model) rememberSelection() {
+	if m.cursor < len(m.rows) && m.rows[m.cursor].kind == rowSession {
+		m.selKey = sessionKey(&m.rows[m.cursor].s)
+	}
+}
+
+func (m *Model) selectedSession() *session.Session {
+	if m.cursor < len(m.rows) && m.rows[m.cursor].kind == rowSession {
+		s := m.rows[m.cursor].s
+		return &s
+	}
+	return nil
+}
+
+// --- navigation ------------------------------------------------------------
+
+func (m Model) pageSize() int {
+	h := m.listBodyHeight()
+	if h < 1 {
+		return 1
+	}
+	return h
+}
+
+// moveCursor steps the selection by delta session rows, skipping headers.
 func (m *Model) moveCursor(delta int) {
 	if len(m.selectable) == 0 {
 		return
 	}
-	idx := m.list.Index()
-	j := sort.SearchInts(m.selectable, idx)
-	exact := j < len(m.selectable) && m.selectable[j] == idx
+	j := sort.SearchInts(m.selectable, m.cursor)
+	exact := j < len(m.selectable) && m.selectable[j] == m.cursor
 	var k int
 	switch {
 	case exact:
@@ -271,12 +272,13 @@ func (m *Model) moveCursor(delta int) {
 	if k >= len(m.selectable) {
 		k = len(m.selectable) - 1
 	}
-	m.list.Select(m.selectable[k])
+	m.cursor = m.selectable[k]
+	m.rememberSelection()
+	m.clampOffset()
 	m.refreshPreview()
 }
 
-// moveToEdge jumps to the first or last selectable session.
-func (m *Model) moveToEdge(end bool) {
+func (m *Model) jumpTo(end bool) {
 	if len(m.selectable) == 0 {
 		return
 	}
@@ -284,60 +286,257 @@ func (m *Model) moveToEdge(end bool) {
 	if end {
 		k = len(m.selectable) - 1
 	}
-	m.list.Select(m.selectable[k])
+	m.cursor = m.selectable[k]
+	m.rememberSelection()
+	m.clampOffset()
 	m.refreshPreview()
 }
 
+// clampOffset keeps the cursor inside the visible scroll window.
+func (m *Model) clampOffset() {
+	h := m.listBodyHeight()
+	if h <= 0 {
+		return
+	}
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+h {
+		m.offset = m.cursor - h + 1
+	}
+	if max := len(m.rows) - h; m.offset > max {
+		m.offset = max
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
+}
+
 func (m *Model) refreshPreview() {
-	it, ok := m.list.SelectedItem().(sessionItem)
-	if !ok {
+	s := m.selectedSession()
+	if s == nil {
 		m.preview.SetContent("")
 		return
 	}
-	m.preview.SetContent(render.FullBox(&it.s))
+	meta := append(styleMetaLines(render.MetaLines(s)),
+		"", helpStyle.Render(fmt.Sprintf("prompts: %d  ·  vv conversation", len(s.Prompts))))
+	m.preview.SetContent(strings.Join(wrapLines(meta, m.preview.Width), "\n"))
 	m.preview.GotoTop()
 }
+
+// --- panels & layout -------------------------------------------------------
+
+// panelWidths resolves the effective panel widths for the current width and
+// toggle state, guaranteeing the list keeps workable room.
+func (m Model) panelWidths() (sideW, prevW, listW int) {
+	listW = m.width
+	if m.sidebarOn && m.width >= 100 {
+		sideW = 20
+		listW -= sideW + 1 // + separator
+	}
+	if m.previewOn && listW >= 90 {
+		prevW = listW * 2 / 5
+		if prevW > 42 {
+			prevW = 42
+		}
+		if prevW < 30 {
+			prevW = 30
+		}
+		listW -= prevW + 1 // + separator
+	}
+	if listW < 30 && prevW > 0 {
+		listW += prevW + 1
+		prevW = 0
+	}
+	if listW < 30 && sideW > 0 {
+		listW += sideW + 1
+		sideW = 0
+	}
+	return sideW, prevW, listW
+}
+
+func (m Model) mainHeight() int {
+	h := m.height - 2 // top + bottom bars
+	if len(m.warnings) > 0 {
+		h--
+	}
+	if m.filtering {
+		h--
+	}
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+func (m Model) listBodyHeight() int { return m.mainHeight() - 1 } // column header line
 
 func (m *Model) resize() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
-	headerH := 2 // title line + column header
-	footerH := 1 // key hints line
-	warnH := 0
-	if len(m.warnings) > 0 {
-		warnH = len(m.warnings)
+	_, prevW, _ := m.panelWidths()
+	m.preview.Width = prevW
+	if m.preview.Width < 10 {
+		m.preview.Width = 10
 	}
-	bodyH := m.height - headerH - footerH - warnH
-	if bodyH < 4 {
-		bodyH = 4
+	m.preview.Height = m.mainHeight() - 2
+	if m.preview.Height < 3 {
+		m.preview.Height = 3
 	}
-	listH := bodyH * 35 / 100
-	if listH < 3 {
-		listH = 3
-	}
-	previewH := bodyH - listH - 1 // border line
-	if previewH < 3 {
-		previewH = 3
-	}
-	m.list.SetSize(m.width, listH)
-	m.tipsWidth = 0
-	previewW := m.width
-	// Keep the fixed-width detail box intact; use the otherwise empty right
-	// side for tips only when the terminal can fit both panes comfortably.
-	if m.width >= 112 {
-		m.tipsWidth = 36
-		previewW = m.width - m.tipsWidth - 2
-	}
-	m.preview.Width = previewW
-	m.preview.Height = previewH
 	m.ready = true
+	m.clampOffset()
+}
+
+// --- provider / agent management -------------------------------------------
+
+// syncProviders re-derives tabs and the session pool after a provider
+// enable/disable. Outside tests it re-reads the registry so availability and
+// the enabled set stay authoritative.
+func (m *Model) syncProviders() {
+	if m.filters.Source == "" && len(provider.All()) > 0 {
+		m.providers = provider.Active()
+	}
+	seen := map[string]bool{}
+	tabs := []string{""}
+	enabled := map[string]bool{}
+	for _, p := range m.providers {
+		name := p.Name()
+		if !provider.IsEnabled(name) || seen[name] {
+			continue
+		}
+		seen[name] = true
+		enabled[name] = true
+		tabs = append(tabs, name)
+	}
+	m.tabs = tabs
+	if m.tabIdx >= len(m.tabs) {
+		m.tabIdx = 0
+	}
+	kept := m.all[:0]
+	for _, s := range m.all {
+		if enabled[s.Source] {
+			kept = append(kept, s)
+		}
+	}
+	m.all = kept
+	m.rebuild()
+}
+
+// toggleAgent flips one provider's enabled state, persists it, and applies it
+// live. Enabling schedules a rescan so the provider's sessions load.
+func (m *Model) toggleAgent(name string) tea.Cmd {
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = config.Config{}
+	}
+	if cfg.IsDisabled(name) {
+		cfg.Enable(name)
+	} else {
+		cfg.Disable(name)
+	}
+	if err := config.Save(cfg); err != nil {
+		m.warnings = append(m.warnings, "warning: could not save config: "+err.Error())
+		return nil
+	}
+	provider.SetDisabled(cfg.Disabled)
+
+	had := false
+	for _, s := range m.all {
+		if s.Source == name {
+			had = true
+			break
+		}
+	}
+	m.syncProviders()
+	if !had && provider.Get(name) != nil && provider.IsEnabled(name) {
+		return m.rescanCmds() // newly enabled — load its sessions
+	}
+	return nil
+}
+
+func (m *Model) openProviderModal() {
+	m.modal = modalProviders
+	m.provCur = 0
+	m.provTemp = map[string]bool{}
+	for _, name := range provider.DisabledNames() {
+		m.provTemp[name] = true
+	}
+}
+
+// openDetailModal shows the selected session's full detail (every prompt,
+// long lines wrapped) in a scrollable popup.
+func (m *Model) openDetailModal() {
+	s := m.selectedSession()
+	if s == nil {
+		return
+	}
+	bw := m.width / 2
+	if bw < 52 {
+		bw = 52
+	}
+	if bw > 100 {
+		bw = 100
+	}
+	if bw > m.width-6 {
+		bw = m.width - 6
+	}
+	m.detail.Width = bw - 6
+	h := m.height - 8
+	if h < 6 {
+		h = 6
+	}
+	m.detail.Height = h
+	var body []string
+	conv := render.ConversationLines(s)
+	if len(conv) == 0 {
+		body = []string{dimStyle.Render("(no prompts in this session)")}
+	} else {
+		body = wrapLines(conv, m.detail.Width)
+	}
+	header := cut(s.Title, m.detail.Width)
+	m.detail.SetContent(strings.Join(append([]string{headerStyle.Render(header), ""}, body...), "\n"))
+	m.detail.GotoTop()
+	m.modal = modalDetail
+}
+
+func (m *Model) rescanCmds() tea.Cmd {
+	m.generation++
+	m.pending = len(m.providers)
+	m.warnings = nil
+	cmds := append([]tea.Cmd{m.spin.Tick}, m.scanCmds()...)
+	return tea.Batch(cmds...)
+}
+
+func (m Model) scanCmds() []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.providers))
+	for _, p := range m.providers {
+		p := p
+		f, generation := m.filters, m.generation
+		cmds = append(cmds, func() tea.Msg {
+			ss, err := p.ListSessions(f)
+			return loadedMsg{generation: generation, name: p.Name(), sessions: ss, err: err}
+		})
+	}
+	return cmds
+}
+
+// --- bubbletea plumbing ----------------------------------------------------
+
+func (m Model) Init() tea.Cmd {
+	cmds := append([]tea.Cmd{m.spin.Tick}, m.scanCmds()...)
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if !m.sized {
+			m.sized = true
+			m.sidebarOn = m.width >= 140
+			m.previewOn = m.width >= 100
+		}
 		m.resize()
 		return m, nil
 
@@ -348,11 +547,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pending > 0 {
 			m.pending--
 		}
-		var cmd tea.Cmd
 		if msg.err != nil {
 			m.warnings = append(m.warnings,
 				fmt.Sprintf("warning: %s provider failed: %v", msg.name, msg.err))
-			m.resize()
 		} else {
 			kept := m.all[:0]
 			for _, existing := range m.all {
@@ -361,7 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.all = append(kept, msg.sessions...)
-			cmd = m.applyItems()
+			m.rebuild()
 		}
 		if m.pending == 0 {
 			firstLoad := !m.loaded
@@ -371,18 +568,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
-		return m, cmd
-
-	// SetItems defers re-filtering to this message; once it lands the filtered
-	// index space is valid, so restore the selection that applyItems deferred.
-	case list.FilterMatchesMsg:
-		var cmd tea.Cmd
-		m.list, cmd = m.list.Update(msg)
-		if m.pendingSelect {
-			m.restoreSelection(m.pendingID, m.pendingSrc)
-			m.pendingSelect = false
-		}
-		return m, cmd
+		return m, nil
 
 	case spinner.TickMsg:
 		if m.pending > 0 {
@@ -393,167 +579,196 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.modal != modalNone {
+			cmd, _ := m.updateModal(msg)
+			return m, cmd
+		}
 		if msg.String() == "ctrl+r" {
 			m.generation++
 			m.pending = len(m.providers)
 			m.warnings = nil
-			m.resize()
 			cmds := append([]tea.Cmd{m.spin.Tick}, m.scanCmds()...)
 			return m, tea.Batch(cmds...)
 		}
-		// While the user is typing a filter, the list owns the keyboard.
-		if m.list.FilterState() == list.Filtering {
-			break
+		if m.filtering {
+			return m.updateFilter(msg)
+		}
+		if m.focus == focusSidebar {
+			return m.updateSidebar(msg)
 		}
 		switch msg.String() {
 		case "enter":
-			if it, ok := m.list.SelectedItem().(sessionItem); ok {
-				s := it.s
-				m.selected = &s
+			if s := m.selectedSession(); s != nil {
+				sel := s
+				m.selected = sel
 				return m, tea.Quit
 			}
 			return m, nil
 		case "esc":
-			if m.list.FilterState() == list.FilterApplied {
-				break // let the list clear its filter
+			switch {
+			case m.filterValue != "":
+				m.filterValue = ""
+				m.filterInput.SetValue("")
+				m.rebuild()
+				return m, nil
+			case m.wsFilter != "":
+				m.wsFilter = ""
+				m.rebuild()
+				return m, nil
 			}
 			return m, tea.Quit
 		case "ctrl+c":
 			return m, tea.Quit
-		case "ctrl+s":
-			m.sortAsc = !m.sortAsc
-			return m, m.applyItems()
 		case "tab":
-			if len(m.sources) > 1 {
-				m.sourceIdx = (m.sourceIdx + 1) % len(m.sources)
-				return m, m.applyItems()
+			m.switchTab(1)
+			return m, nil
+		case "shift+tab", "left":
+			m.switchTab(-1)
+			return m, nil
+		case "right":
+			m.switchTab(1)
+			return m, nil
+		case "/":
+			m.filtering = true
+			m.filterInput.Focus()
+			m.filterInput.CursorEnd()
+			return m, textinput.Blink
+		case "w":
+			if m.sidebarOn && m.width >= 100 {
+				m.focus = focusSidebar
 			}
 			return m, nil
-		}
-
-		// Unfiltered: navigation must skip group-header rows, so drive the
-		// cursor over the selectable index list ourselves. While filtering
-		// (or filtered), headers are gone and the list owns navigation.
-		if m.list.FilterState() == list.Unfiltered {
-			switch msg.String() {
-			case "up", "k":
-				m.moveCursor(-1)
-				return m, nil
-			case "down", "j":
-				m.moveCursor(1)
-				return m, nil
-			case "pgup", "left", "h", "b":
-				m.moveCursor(-m.list.Paginator.PerPage)
-				return m, nil
-			case "pgdown", "right", "l", "f":
-				m.moveCursor(m.list.Paginator.PerPage)
-				return m, nil
-			case "home", "g":
-				m.moveToEdge(false)
-				return m, nil
-			case "end", "G":
-				m.moveToEdge(true)
+		case "o":
+			m.sidebarOn = !m.sidebarOn
+			m.resize()
+			return m, nil
+		case "v":
+			now := time.Now()
+			if now.Sub(m.lastV) <= 600*time.Millisecond {
+				m.lastV = time.Time{}
+				m.openDetailModal()
 				return m, nil
 			}
+			m.lastV = now
+			m.previewOn = !m.previewOn
+			m.resize()
+			return m, nil
+		case "g":
+			m.grouped = !m.grouped
+			m.rebuild()
+			return m, nil
+		case "P":
+			m.openProviderModal()
+			return m, nil
+		case "?":
+			m.modal = modalHelp
+			return m, nil
+		case "up", "k":
+			m.moveCursor(-1)
+			return m, nil
+		case "down", "j":
+			m.moveCursor(1)
+			return m, nil
+		case "pgup", "b":
+			m.moveCursor(-m.pageSize())
+			return m, nil
+		case "pgdown", "f":
+			m.moveCursor(m.pageSize())
+			return m, nil
+		case "home":
+			m.jumpTo(false)
+			return m, nil
+		case "end", "G":
+			m.jumpTo(true)
+			return m, nil
+		case "ctrl+d":
+			m.preview.HalfPageDown()
+			return m, nil
+		case "ctrl+u":
+			m.preview.HalfPageUp()
+			return m, nil
 		}
 	}
+	return m, nil
+}
 
+func (m *Model) switchTab(delta int) {
+	if len(m.tabs) > 1 {
+		m.tabIdx = (m.tabIdx + delta + len(m.tabs)) % len(m.tabs)
+	}
+	m.rebuild()
+}
+
+func (m Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if ok {
+		switch key.String() {
+		case "enter":
+			m.filtering = false
+			m.filterInput.Blur()
+			return m, nil
+		case "esc":
+			m.filtering = false
+			m.filterValue = ""
+			m.filterInput.SetValue("")
+			m.filterInput.Blur()
+			m.rebuild()
+			return m, nil
+		}
+	}
 	var cmd tea.Cmd
-	prevIndex := m.list.Index()
-	m.list, cmd = m.list.Update(msg)
-	if m.list.Index() != prevIndex || m.list.SettingFilter() || m.list.FilterState() != list.Unfiltered {
-		m.refreshPreview()
+	m.filterInput, cmd = m.filterInput.Update(msg)
+	if m.filterInput.Value() != m.filterValue {
+		m.filterValue = m.filterInput.Value()
+		m.rebuild()
 	}
 	return m, cmd
 }
 
-func tipsForSource(source string) string {
-	lines := []string{
-		"Session tips",
-		"resumer only browses and resumes.",
-		"",
+func (m Model) updateSidebar(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
 	}
-	switch source {
-	case "opencode":
-		lines = append(lines,
-			"OpenCode: delete with",
-			"opencode session delete",
-			"<sessionID>",
-		)
-	case "kimi-code":
-		lines = append(lines,
-			"Kimi Code: open its session",
-			"picker, select a session,",
-			"press Ctrl+X, then confirm.",
-		)
-	case "codebuddy":
-		lines = append(lines,
-			"CodeBuddy",
-			"Switch: /resume <session-id>",
-			"Picker: codebuddy --resume",
-			"Latest: codebuddy --continue",
-			"Rename: /rename <name>",
-			"New: /clear (history stays)",
-			"Delete one: Beta HTTP API",
-			"DELETE /api/v1/sessions/:id",
-			"Project purge is broader.",
-			"Preview purge: --dry-run.",
-		)
-	default:
-		lines = append(lines,
-			"Use this Agent's own CLI/TUI",
-			"session manager. The exact",
-			"steps differ by Agent/version.",
-		)
+	items := len(m.groups) + len(m.providers)
+	switch key.String() {
+	case "esc", "w":
+		m.focus = focusList
+		return m, nil
+	case "up", "k":
+		if m.sideCur > 0 {
+			m.sideCur--
+		}
+		return m, nil
+	case "down", "j":
+		if m.sideCur < items-1 {
+			m.sideCur++
+		}
+		return m, nil
+	case " ", "enter":
+		return m, m.activateSidebarItem()
 	}
-	lines = append(lines,
-		"",
-		"Check the session ID first.",
-		"Deletion may be irreversible.",
-	)
-	return strings.Join(lines, "\n")
+	return m, nil
 }
 
-func (m Model) View() string {
-	if !m.ready {
-		return "loading…"
-	}
-	var b strings.Builder
-
-	title := "resumer"
-	src := m.sources[m.sourceIdx]
-	if src == "" {
-		src = "all"
-	}
-	status := fmt.Sprintf("%d sessions · %d workspaces · source: %s",
-		len(m.selectable), m.workspaces, src)
-	if m.pending > 0 {
-		status = m.spin.View() + " loading · " + status
-	}
-	b.WriteString(headerStyle.Render(title) + "  " + helpStyle.Render(status) + "\n")
-	b.WriteString(ColumnHeader() + "\n")
-	for _, w := range m.warnings {
-		b.WriteString(warnStyle.Render(w) + "\n")
-	}
-	b.WriteString(m.list.View() + "\n")
-	preview := m.preview.View()
-	if m.tipsWidth > 0 {
-		source := ""
-		if item, ok := m.list.SelectedItem().(sessionItem); ok {
-			source = item.s.Source
+// activateSidebarItem applies the item under the sidebar cursor: workspace
+// items toggle the workspace filter, agent items toggle the provider.
+func (m *Model) activateSidebarItem() tea.Cmd {
+	if m.sideCur < len(m.groups) {
+		g := m.groups[m.sideCur]
+		if m.wsFilter == g.Key {
+			m.wsFilter = ""
+		} else {
+			m.wsFilter = g.Key
 		}
-		tipText := m.customTips
-		if tipText == "" {
-			tipText = tipsForSource(source)
-		}
-		tips := tipsStyle.Width(m.tipsWidth - 1).Height(m.preview.Height).Render(tipText)
-		preview = lipgloss.JoinHorizontal(lipgloss.Top, preview, "  ", tips)
+		m.rebuild()
+		return nil
 	}
-	b.WriteString(previewStyle.Width(m.width).Render(preview))
-	// Key hints live on the last line: they are reference material, and the
-	// top of the screen is where the session list belongs.
-	b.WriteString("\n" + helpStyle.Render(helpLine))
-	return b.String()
+	j := m.sideCur - len(m.groups)
+	if j >= 0 && j < len(m.providers) {
+		return m.toggleAgent(m.providers[j].Name())
+	}
+	return nil
 }
 
 // Pick runs the picker. Returns (selection, sawNoSessions, error); selection

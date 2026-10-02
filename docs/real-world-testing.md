@@ -466,7 +466,7 @@ one-minute sanity check only.
 | behavior | automated coverage | manual check |
 |---|---|---|
 | merged list renders every active provider with badges | `tests/integration.TestUnifiedRender` | `./resumer list --all --no-group` shows `[cb] [kimi] [oc]` rows |
-| sessions grouped by workspace; same directory merges across providers | `internal/workspace`, `internal/render.TestIndexGroupedMergesByDirectory`, `tests/integration.TestGroupedRender`, `internal/tui.TestSessionListGroupsByWorkspace` | `./resumer list --all` shows `── <dir>  ·  N sessions  ·  <providers>` headers (0.4) |
+| sessions grouped by workspace; same directory merges across providers | `internal/workspace`, `internal/render.TestIndexGroupedMergesByDirectory`, `tests/integration.TestGroupedRender`, `internal/tui.TestSidebarWorkspaceFilter`, `internal/tui.TestGroupModeToggleAndNavigation` | `./resumer list --all` shows `── <dir>  ·  N sessions  ·  <providers>` headers (0.4); picker filters via the sidebar |
 | kimi native workspace id (session bucket) + `workspaces.json` root | `internal/provider/kimi.TestFixtureParsing`, `TestISOTimestampsAndWorkDirParsed` | `./resumer list --source kimi-code --all --json` shows `workspace_id` |
 | opencode `workspace_id`/`project_id`, `global` sentinel ignored | `internal/provider/opencode.TestSQLiteParsing`, `TestGlobalProjectHasNoWorkspaceID`, `TestJSONFallbackSession` | `./resumer list --source opencode --all --json` |
 | deleted working directory labeled, resume refused, `mkdir -p` printed, exit 3 | `internal/cwd.*`, `internal/render.TestRenderersFlagMissingWorkingDirectory`, `tests/integration.TestSelectRefusesWhenWorkingDirectoryIsGone` | 1.6 |

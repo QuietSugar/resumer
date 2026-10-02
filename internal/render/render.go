@@ -161,14 +161,10 @@ func groupHeader(g workspace.Group) string {
 		label, len(g.Sessions), noun, strings.Join(g.Providers, ", "), deleted)
 }
 
-// FullBox renders the single-session detail box (used as the TUI preview).
-func FullBox(s *session.Session) string {
-	const width = 72
-	bar := strings.Repeat("─", width)
-	lines := []string{"┌" + bar}
-	add := func(format string, a ...any) {
-		lines = append(lines, fmt.Sprintf(format, a...))
-	}
+// MetaLines renders a session's identity/timing metadata: no prompt content.
+// The picker's detail panel shows these; the conversation itself has its own
+// view (ConversationLines) because it can be arbitrarily long.
+func MetaLines(s *session.Session) []string {
 	dir := s.Cwd
 	switch {
 	case dir == "":
@@ -176,42 +172,70 @@ func FullBox(s *session.Session) string {
 	case cwd.Missing(s):
 		dir += "  (directory no longer exists — recreate it before resuming)"
 	}
-	add("│ source:         [%s]", s.Source)
-	add("│ 📁 project:     %s", s.ProjectLabel)
-	add("│ session id:     %s", s.SessionID)
-	add("│ started:        %s", textutil.FmtTS(s.FirstTS, true))
-	add("│ last activity:  %s", textutil.FmtTS(s.LastTS, true))
-	add("│ duration:       %s", textutil.FmtDuration(s.FirstTS, s.LastTS))
-	add("│ cwd:            %s", dir)
-	add("│ activity:       %d user prompts / ~%d assistant activity", len(s.Prompts), s.AsstCount)
+	lines := []string{
+		fmt.Sprintf(" source:         [%s]", s.Source),
+		fmt.Sprintf(" project:        %s", s.ProjectLabel),
+		fmt.Sprintf(" session id:     %s", s.SessionID),
+		fmt.Sprintf(" started:        %s", textutil.FmtTS(s.FirstTS, true)),
+		fmt.Sprintf(" last activity:  %s", textutil.FmtTS(s.LastTS, true)),
+		fmt.Sprintf(" duration:       %s", textutil.FmtDuration(s.FirstTS, s.LastTS)),
+		fmt.Sprintf(" cwd:            %s", dir),
+		fmt.Sprintf(" activity:       %d user prompts / ~%d assistant activity", len(s.Prompts), s.AsstCount),
+	}
 	if s.Title != "" {
-		add("│ title:          %s", s.Title)
+		lines = append(lines, fmt.Sprintf(" title:          %s", s.Title))
 	}
 	if s.Subtitle != "" {
-		add("│ context:        %s", s.Subtitle)
+		lines = append(lines, fmt.Sprintf(" context:        %s", s.Subtitle))
 	}
-	lines = append(lines, "├"+bar)
-	lines = append(lines, "│ opening prompts")
-	if len(s.Prompts) == 0 && s.FirstPrompt != "" {
-		add("│  %s", textutil.Trim(s.FirstPrompt, 350))
-	}
-	openEnd := len(s.Prompts)
-	if openEnd > 3 {
-		openEnd = 3
-	}
-	for i := 0; i < openEnd; i++ {
-		add("│  [%d] %s", i+1, textutil.Trim(s.Prompts[i].Text, 350))
-	}
-	lastStart := len(s.Prompts) - 2
-	if lastStart < openEnd {
-		lastStart = openEnd
-	}
-	if lastStart < len(s.Prompts) {
-		lines = append(lines, "│")
-		lines = append(lines, "│ last prompts")
-		for i := lastStart; i < len(s.Prompts); i++ {
-			add("│  [%d] %s", i-lastStart+1, textutil.Trim(s.Prompts[i].Text, 350))
+	return lines
+}
+
+// ConversationLines renders the session's prompts as a numbered list, one
+// entry per prompt (timestamps included when known). Long lines are wrapped
+// by the caller to its panel width.
+func ConversationLines(s *session.Session) []string {
+	lines := make([]string, 0, len(s.Prompts))
+	for i, p := range s.Prompts {
+		stamp := ""
+		if _, ok := textutil.ParseISO(p.TS); ok {
+			stamp = textutil.FmtTS(p.TS, false) + "  "
 		}
+		lines = append(lines, fmt.Sprintf("[%d] %s%s", i+1, stamp, textutil.Trim(p.Text, 400)))
+	}
+	return lines
+}
+
+// DetailLines composes metadata plus the first/last prompts; negative first or
+// last means "show every prompt". Used by `list --full` and the detail panel.
+func DetailLines(s *session.Session, first, last int) []string {
+	lines := MetaLines(s)
+	prompts := ConversationLines(s)
+	total := len(prompts)
+	if total == 0 {
+		if s.FirstPrompt != "" {
+			lines = append(lines, " prompts", "  "+textutil.Trim(s.FirstPrompt, 350))
+		}
+		return lines
+	}
+	lines = append(lines, " prompts")
+	if first < 0 || last < 0 || first+last >= total {
+		lines = append(lines, prompts...)
+		return lines
+	}
+	lines = append(lines, prompts[:first]...)
+	lines = append(lines, fmt.Sprintf("  … %d more", total-first-last))
+	lines = append(lines, prompts[total-last:]...)
+	return lines
+}
+
+// FullBox renders the single-session detail box (used by `list --full`).
+func FullBox(s *session.Session) string {
+	const width = 72
+	bar := strings.Repeat("─", width)
+	lines := []string{"┌" + bar}
+	for _, l := range DetailLines(s, 3, 2) {
+		lines = append(lines, "│"+l)
 	}
 	lines = append(lines, "└"+bar)
 	return strings.Join(lines, "\n")

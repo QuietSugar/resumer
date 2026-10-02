@@ -30,15 +30,15 @@ resumer list         # grouped by workspace, every session
 resumer --help       # everything else
 ```
 
-Picker keys: `↑↓` browse · `/` filter · `tab` cycle source · `ctrl-s` toggle sort ·
-`enter` resume · `esc` cancel. They are listed on the last line of the
-screen. The session list carries a one-line column header (`age` `agent`
-`title`) so the fixed-width rows are self-describing, and sessions are grouped
-under a workspace row shaped like `2 sessions · …/h/d/g/g/Q/resumer` — session
-count first, then the abbreviated directory (leading components collapsed to
-their first letters, the final directory always in full). The trailing marker
-column is a rough conversation-weight bar, colored gray → yellow → red in the
-picker: blank <20 messages, `▁` 20–49, `▄` 50–149, `█` 150+.
+Picker keys: `↑↓` browse · `/` filter · `tab` provider tabs · `w` sidebar ·
+`o`/`v` toggle panels · `g` group mode · `P` providers · `?` help ·
+`enter` resume · `esc` cancel. The last line of the screen
+always shows the keys available in the current context. The session list
+carries a one-line column header (`age` `agent` `title`); on terminals ≥100
+columns a detail panel opens on the right, and ≥140 columns a
+workspace/agents sidebar joins on the left — `o`/`v` toggle either panel.
+The leading marker column (`sz`) is a rough conversation-weight bar, colored gray →
+yellow → red in the picker: blank <20 messages, `▁` 20–49, `▄` 50–149, `█` 150+.
 
 Useful flags (both picker and `list`): `--days N` (narrow to the last N days —
 **the default is no time limit, so every session is listed**), `--date YYYY-MM-DD`,
@@ -49,10 +49,10 @@ The `asst_count` JSON field and detail-preview
 assistant activity figure are provider-specific rough size estimates; counting
 rules differ and the values are not exact or directly comparable across providers.
 
-The picker tips pane uses provider-specific built-in tips by default. To replace
-these with your own plain-text tips, create `~/.config/resumer/tips.md` or set
-`RESUMER_TIPS_FILE` to another file path. The file is read when the picker
-starts; a missing or blank file falls back to the built-in tips.
+The help popup (`?`) embeds provider-specific built-in tips by default. To
+replace these with your own plain-text tips, create `~/.config/resumer/tips.md`
+or set `RESUMER_TIPS_FILE` to another file path. The file is read when the
+picker starts; a missing or blank file falls back to the built-in tips.
 
 ## Workspaces
 
