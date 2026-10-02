@@ -1,3 +1,0 @@
-{"type":"system","subtype":"init","cwd":"/bogus/wrong/path","gitBranch":"main","timestamp":"2026-04-15T04:30:00.000Z"}
-{"type":"user","timestamp":"2026-04-15T04:30:05.000Z","message":{"role":"user","content":"stale cwd regression fixture — stored cwd is bogus, resolve must walk"}}
-{"type":"assistant","timestamp":"2026-04-15T04:30:12.000Z","message":{"role":"assistant","content":[{"type":"text","text":"ack"}]}}

@@ -1,5 +1,0 @@
-{"type":"system","subtype":"init","cwd":"/tmp/resumer-fixtures/alpha","gitBranch":"main","timestamp":"2026-04-15T01:00:00.000Z"}
-{"type":"user","timestamp":"2026-04-15T01:00:05.000Z","message":{"role":"user","content":"plain fixture first prompt"}}
-{"type":"assistant","timestamp":"2026-04-15T01:00:12.000Z","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}
-{"type":"user","timestamp":"2026-04-15T01:05:00.000Z","message":{"role":"user","content":"plain fixture second prompt"}}
-{"type":"assistant","timestamp":"2026-04-15T01:05:07.000Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}

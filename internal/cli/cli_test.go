@@ -140,7 +140,7 @@ func TestRunAppliesConfigToRegistry(t *testing.T) {
 	setConfigPath(t)
 	registerProviders()
 	var cfg config.Config
-	cfg.Disable("codex")
+	cfg.Disable("kimi")
 	if err := config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -148,13 +148,15 @@ func TestRunAppliesConfigToRegistry(t *testing.T) {
 	t.Cleanup(func() { provider.SetDisabled(nil) })
 
 	// list --json with fixture roots; the point is Run() applying the config
-	// (SetDisabled) before scanning, so codex is never queried. Give every
+	// (SetDisabled) before scanning, so kimi is never queried. Give every
 	// provider a real or empty-but-existing root so nothing errors.
 	dir := t.TempDir()
-	t.Setenv("RESUMER_CLAUDE_PROJECT_ROOT", dir)
+	// codebuddy only needs projects/ to exist — its availability check has no
+	// binary requirement, so it stays available with no mocks on PATH.
+	if err := os.MkdirAll(filepath.Join(dir, "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("RESUMER_CODEBUDDY_HOME", dir)
-	t.Setenv("RESUMER_CODEX_SESSION_ROOT", dir)
-	t.Setenv("RESUMER_CODEX_INDEX_FILE", filepath.Join(dir, "idx.jsonl"))
 	t.Setenv("RESUMER_KIMI_HOME", dir)
 	t.Setenv("RESUMER_KIMI_BIN", "kimi-missing-for-test")
 	t.Setenv("RESUMER_OPENCODE_DATA", dir)
@@ -166,7 +168,7 @@ func TestRunAppliesConfigToRegistry(t *testing.T) {
 		t.Fatalf("Run list --json exit = %d", code)
 	}
 	// Run must have pushed the config into the registry filter.
-	if provider.IsEnabled("codex") {
+	if provider.IsEnabled("kimi") {
 		t.Error("Run did not apply disabled config to the registry")
 	}
 }

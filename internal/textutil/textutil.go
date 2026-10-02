@@ -123,17 +123,163 @@ func PadDisplay(s string, targetW int) string {
 // to match the providers' own "(unknown)" placeholder.
 const DirDeletedLabel = "(deleted)"
 
-// VolumeMarker is the fixed 1-col conversation weight marker:
-// <20 blank / 20-49 · / 50-149 ● / 150+ ◉
+// VolumeMarker is the fixed 1-col conversation weight bar. Block glyphs scale
+// with the session size, so the level reads at a glance:
+//
+//	<20 messages   blank   (nothing worth glancing at)
+//	20–49          ▁
+//	50–149         ▄
+//	150+           █
 func VolumeMarker(totalMsgs int) string {
 	switch {
 	case totalMsgs < 20:
 		return " "
 	case totalMsgs < 50:
-		return "·"
+		return "▁"
 	case totalMsgs < 150:
-		return "●"
+		return "▄"
 	default:
-		return "◉"
+		return "█"
 	}
+}
+
+// defaultPathBudget is the display-width budget ShortenPath uses when the
+// caller does not supply one.
+const defaultPathBudget = 44
+
+// ShortenPath abbreviates p to at most budget display columns, degrading
+// progressively so the tail stays readable:
+//
+//   - paths of three components or fewer that already fit are unchanged;
+//   - otherwise the last component is shown in full, its parent in up to four
+//     characters, and components further back collapse progressively
+//     (3, 2, then a single leading rune) behind an ellipsis;
+//   - when that is still too wide, the parent tightens to three characters and
+//     the earliest components are dropped one by one;
+//   - as a last resort the final component itself is cut to the budget, so the
+//     result never outgrows it no matter how deep the path.
+func ShortenPath(p string, budget int) string {
+	s := strings.TrimSpace(p)
+	if s == "" {
+		return ""
+	}
+	if budget <= 0 {
+		budget = defaultPathBudget
+	}
+	clean := strings.TrimRight(s, "/")
+	if clean == "" {
+		return "/"
+	}
+
+	var parts []string
+	for _, part := range strings.Split(strings.TrimPrefix(clean, "/"), "/") {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "/"
+	}
+	// Abbreviation gains nothing on very short paths that already fit.
+	if len(parts) <= 3 && DisplayWidth(clean) <= budget {
+		return clean
+	}
+
+	// capAt limits a component's runes by its distance from the end (0 = last
+	// component, unlimited). Tight mode trades the parent down to three runes
+	// and everything older to one.
+	capAt := func(dist int, tight bool) int {
+		if dist == 0 {
+			return -1
+		}
+		if tight {
+			if dist == 1 {
+				return 3
+			}
+			return 1
+		}
+		switch dist {
+		case 1:
+			return 4
+		case 2:
+			return 3
+		case 3:
+			return 2
+		}
+		return 1
+	}
+
+	// render joins the last keep components behind an ellipsis.
+	render := func(keep int, tight bool) (string, int) {
+		var b strings.Builder
+		b.WriteString("…/")
+		w := DisplayWidth("…/")
+		for i := len(parts) - keep; i < len(parts); i++ {
+			part := parts[i]
+			if dist := len(parts) - 1 - i; dist > 0 {
+				part = cutRunes(part, capAt(dist, tight))
+			}
+			if i < len(parts)-1 {
+				part += "/"
+			}
+			b.WriteString(part)
+			w += DisplayWidth(part)
+		}
+		return b.String(), w
+	}
+
+	candidates := []struct {
+		keep  int
+		tight bool
+	}{{len(parts), false}, {len(parts), true}}
+	for keep := len(parts) - 1; keep >= 1; keep-- {
+		candidates = append(candidates, struct {
+			keep  int
+			tight bool
+		}{keep, true})
+	}
+	for _, c := range candidates {
+		if out, w := render(c.keep, c.tight); w <= budget {
+			return out
+		}
+	}
+
+	// Last resort: the final component alone, cut to what remains of the
+	// budget — the result can then never outgrow it.
+	prefix := "…/"
+	rest := budget - DisplayWidth(prefix)
+	if rest <= 0 {
+		return "…"
+	}
+	return prefix + cutWidth(parts[len(parts)-1], rest)
+}
+
+// cutRunes cuts s to at most max runes.
+func cutRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max])
+}
+
+// cutWidth cuts s to at most w display columns without adding an ellipsis.
+func cutWidth(s string, w int) string {
+	if DisplayWidth(s) <= w {
+		return s
+	}
+	var b strings.Builder
+	used := 0
+	for _, ch := range s {
+		cw := runewidth.RuneWidth(ch)
+		if used+cw > w {
+			break
+		}
+		b.WriteRune(ch)
+		used += cw
+	}
+	return b.String()
 }

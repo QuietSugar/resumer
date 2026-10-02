@@ -1,5 +1,5 @@
 // Package provider defines the Provider interface and the registry that
-// merges sessions across providers. Adding a provider (e.g. Gemini) means
+// merges sessions across providers. Adding a provider means
 // one new package plus one entry in the registry slice.
 package provider
 

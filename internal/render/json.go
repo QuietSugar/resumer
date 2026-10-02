@@ -15,16 +15,20 @@ type jsonPrompt struct {
 }
 
 type jsonSession struct {
-	Source      string  `json:"source"`
-	SessionID   string  `json:"session_id"`
-	Path        string  `json:"path"`
-	Cwd         *string `json:"cwd"`
-	FirstTS     *string `json:"first_ts"`
-	LastTS      *string `json:"last_ts"`
-	Title       *string `json:"title"`
-	Subtitle    *string `json:"subtitle"`
-	FirstPrompt *string `json:"first_prompt"`
-	LastPrompt  *string `json:"last_prompt"`
+	Source    string  `json:"source"`
+	SessionID string  `json:"session_id"`
+	Path      string  `json:"path"`
+	Cwd       *string `json:"cwd"`
+	// WorkspaceID/WorkspaceRoot expose the provider-native workspace identity
+	// when the provider has one; both are null otherwise.
+	WorkspaceID   *string `json:"workspace_id"`
+	WorkspaceRoot *string `json:"workspace_root"`
+	FirstTS       *string `json:"first_ts"`
+	LastTS        *string `json:"last_ts"`
+	Title         *string `json:"title"`
+	Subtitle      *string `json:"subtitle"`
+	FirstPrompt   *string `json:"first_prompt"`
+	LastPrompt    *string `json:"last_prompt"`
 	// AsstCount is a provider-specific rough activity estimate, not an exact
 	// assistant-turn count; see session.Session.AsstCount.
 	AsstCount  int          `json:"asst_count"`
@@ -54,19 +58,21 @@ func JSON(sessions []session.Session) string {
 			argv = []string{}
 		}
 		out = append(out, jsonSession{
-			Source:      s.Source,
-			SessionID:   s.SessionID,
-			Path:        s.Path,
-			Cwd:         nullable(s.Cwd),
-			FirstTS:     nullable(s.FirstTS),
-			LastTS:      nullable(s.LastTS),
-			Title:       nullable(s.Title),
-			Subtitle:    nullable(s.Subtitle),
-			FirstPrompt: nullable(s.FirstPrompt),
-			LastPrompt:  nullable(s.LastPrompt),
-			AsstCount:   s.AsstCount,
-			Prompts:     prompts,
-			ResumeArgv:  argv,
+			Source:        s.Source,
+			SessionID:     s.SessionID,
+			Path:          s.Path,
+			Cwd:           nullable(s.Cwd),
+			WorkspaceID:   nullable(s.WorkspaceID),
+			WorkspaceRoot: nullable(s.WorkspaceRoot),
+			FirstTS:       nullable(s.FirstTS),
+			LastTS:        nullable(s.LastTS),
+			Title:         nullable(s.Title),
+			Subtitle:      nullable(s.Subtitle),
+			FirstPrompt:   nullable(s.FirstPrompt),
+			LastPrompt:    nullable(s.LastPrompt),
+			AsstCount:     s.AsstCount,
+			Prompts:       prompts,
+			ResumeArgv:    argv,
 		})
 	}
 	var buf bytes.Buffer

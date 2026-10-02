@@ -4,7 +4,8 @@
 //
 //   - v1.1+ / v2: SQLite at $XDG_DATA_HOME/opencode/opencode.db
 //     (stable channel; channel-suffixed opencode-<channel>.db otherwise).
-//     session table: id/title/directory/parent_id and timestamps.
+//     session table: id/title/directory/parent_id, workspace_id/project_id
+//     (native workspace identity), and timestamps.
 //     time_created/time_updated/time_archived (epoch milliseconds).
 //     Prompts: session_message rows ({type:"user",text}) in v2; legacy
 //     message+part table pairs in dbs migrated from 1.x.
@@ -315,6 +316,14 @@ func (p *Provider) readSQLite(path string) ([]session.Session, error) {
 		}
 		title, _ := r.Str("title")
 		dir, _ := r.Str("directory")
+		// Workspace identity: workspace_id wins; project_id is the fallback,
+		// except the literal "global" (opencode's "not a real project" sentinel).
+		workspaceID, _ := r.Str("workspace_id")
+		if workspaceID == "" {
+			if projID, _ := r.Str("project_id"); projID != "" && projID != "global" {
+				workspaceID = projID
+			}
+		}
 		created, _ := r.Int("time_created")
 		updated, _ := r.Int("time_updated")
 		pa := prompts[id]
@@ -325,6 +334,7 @@ func (p *Provider) readSQLite(path string) ([]session.Session, error) {
 			Path:         fmt.Sprintf("%s#session/%s", path, id),
 			ProjectLabel: projectLabel(dir),
 			Cwd:          dir,
+			WorkspaceID:  workspaceID,
 			FirstTS:      msToTS(created),
 			LastTS:       msToTS(updated),
 			Title:        strings.TrimSpace(title),
@@ -426,12 +436,17 @@ func (p *Provider) readJSON() ([]session.Session, error) {
 				}
 			}
 		}
+		workspaceID := info.ProjectID
+		if workspaceID == "global" {
+			workspaceID = ""
+		}
 		out = append(out, session.Session{
 			Source:       "opencode",
 			SessionID:    info.ID,
 			Path:         path,
 			ProjectLabel: projectLabel(info.Directory),
 			Cwd:          info.Directory,
+			WorkspaceID:  workspaceID,
 			FirstTS:      msToTS(info.Time.Created),
 			LastTS:       msToTS(info.Time.Updated),
 			Title:        strings.TrimSpace(info.Title),

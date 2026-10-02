@@ -18,9 +18,7 @@ import (
 	"github.com/QuietSugar/resumer/internal/cwd"
 	"github.com/QuietSugar/resumer/internal/execres"
 	"github.com/QuietSugar/resumer/internal/provider"
-	"github.com/QuietSugar/resumer/internal/provider/claudecode"
 	"github.com/QuietSugar/resumer/internal/provider/codebuddy"
-	"github.com/QuietSugar/resumer/internal/provider/codex"
 	"github.com/QuietSugar/resumer/internal/provider/kimi"
 	"github.com/QuietSugar/resumer/internal/provider/opencode"
 	"github.com/QuietSugar/resumer/internal/render"
@@ -30,9 +28,7 @@ import (
 
 func registerProviders() {
 	if len(provider.All()) == 0 {
-		provider.Register(claudecode.New())
 		provider.Register(codebuddy.New())
-		provider.Register(codex.New())
 		provider.Register(kimi.New())
 		provider.Register(opencode.New())
 	}
@@ -50,12 +46,13 @@ Unified AI CLI session resumer.
                        at all until turned back on
 
 options:
-  --source NAME    limit to a single provider (claude-code | codebuddy | codex | kimi-code | opencode)
+  --source NAME    limit to a single provider (codebuddy | kimi-code | opencode)
   --days N         only show sessions active in the last N days (default: no limit)
   --date DATE      YYYY-MM-DD — only sessions active on this date
   --all            no time filter
   --project STR    substring match against project name
   --limit N        top N after sort
+  --no-group       list mode: flat table, do not group by workspace
   --json           list mode only: emit JSON array of sessions
   --full [N]       list mode only: render detailed boxes for top N (default 5)
   --version        print version
@@ -135,6 +132,7 @@ func Run(argv []string, version string) int {
 		all         = fs.Bool("all", false, "no time filter")
 		project     = fs.String("project", "", "project substring")
 		limit       = fs.Int("limit", 0, "top N after sort")
+		noGroup     = fs.Bool("no-group", false, "flat table (list mode)")
 		jsonOut     = fs.Bool("json", false, "JSON output (list mode)")
 		full        = fs.Int("full", -1, "detail boxes for top N (list mode)")
 	)
@@ -149,10 +147,10 @@ func Run(argv []string, version string) int {
 		fmt.Printf("resumer %s\n", version)
 		return 0
 	}
-	validSources := map[string]bool{"claude-code": true, "codebuddy": true, "codex": true, "kimi-code": true, "opencode": true}
+	validSources := map[string]bool{"codebuddy": true, "kimi-code": true, "opencode": true}
 	if *source != "" && !validSources[*source] {
 		fmt.Fprintf(os.Stderr,
-			"error: argument --source: invalid choice: %q (choose from claude-code, codebuddy, codex, kimi-code, opencode)\n", *source)
+			"error: argument --source: invalid choice: %q (choose from codebuddy, kimi-code, opencode)\n", *source)
 		return 2
 	}
 
@@ -174,7 +172,7 @@ func Run(argv []string, version string) int {
 	// at `provider on` rather than claiming nothing is installed.
 	if *source == "" && len(provider.AvailableSourceNames()) == 0 {
 		msg := "error: no session providers available. " +
-			"Install Claude Code, CodeBuddy, Codex, Kimi, or OpenCode and ensure their session storage exists."
+			"Install CodeBuddy, Kimi, or OpenCode and ensure their session storage exists."
 		if dis := provider.DisabledNames(); len(dis) > 0 {
 			msg = fmt.Sprintf(
 				"error: no enabled session providers available (disabled: %s). "+
@@ -185,6 +183,8 @@ func Run(argv []string, version string) int {
 		return 2
 	}
 
+	// --no-group is a display hint only; harmless outside list mode, so it is
+	// ignored rather than rejected.
 	if command != "list" && (*jsonOut || *full >= 0) {
 		fmt.Fprintln(os.Stderr,
 			"error: --json and --full are only valid with the 'list' subcommand")
@@ -192,12 +192,12 @@ func Run(argv []string, version string) int {
 	}
 
 	if command == "list" {
-		return runList(filters, *jsonOut, *full)
+		return runList(filters, *jsonOut, *full, *noGroup)
 	}
 	return runPicker(filters)
 }
 
-func runList(filters session.Filters, jsonOut bool, full int) int {
+func runList(filters session.Filters, jsonOut bool, full int, noGroup bool) int {
 	sessions, err := provider.MergedList(filters)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -215,8 +215,10 @@ func runList(filters session.Filters, jsonOut bool, full int) int {
 			fmt.Println(render.FullBox(&sessions[i]))
 			fmt.Println()
 		}
-	default:
+	case noGroup:
 		fmt.Println(render.Index(sessions))
+	default:
+		fmt.Println(render.IndexGrouped(sessions))
 	}
 	return 0
 }
@@ -450,9 +452,7 @@ func execResume(s *session.Session) int {
 	if err != nil {
 		binName := s.ResumeArgv[0]
 		installHint := map[string]string{
-			"claude":    "https://docs.anthropic.com/en/docs/claude-code/quickstart",
 			"codebuddy": "https://www.codebuddy.ai/docs/cli/reference",
-			"codex":     "https://github.com/openai/codex",
 			"kimi":      "https://github.com/MoonshotAI/kimi-code",
 			"opencode":  "https://opencode.ai/docs",
 		}[binName]

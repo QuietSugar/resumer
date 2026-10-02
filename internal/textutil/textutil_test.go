@@ -1,6 +1,9 @@
 package textutil
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFmtTS(t *testing.T) {
 	if got := FmtTS("2026-04-15T01:00:05.000Z", true); got != "2026-04-15 01:00:05" {
@@ -79,11 +82,46 @@ func TestVolumeMarker(t *testing.T) {
 	cases := []struct {
 		in   int
 		want string
-	}{{5, " "}, {20, "·"}, {49, "·"}, {50, "●"}, {149, "●"}, {150, "◉"}}
+	}{{5, " "}, {20, "▁"}, {49, "▁"}, {50, "▄"}, {149, "▄"}, {150, "█"}}
 	for _, c := range cases {
 		if got := VolumeMarker(c.in); got != c.want {
 			t.Errorf("VolumeMarker(%d) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestShortenPath(t *testing.T) {
+	cases := []struct {
+		in     string
+		budget int
+		want   string
+	}{
+		{"", 44, ""},
+		{"/", 44, "/"},
+		{"/ws/a", 44, "/ws/a"},   // short paths stay readable
+		{"/a/b/c", 44, "/a/b/c"}, // three components: unchanged
+		// Progressive: parent gets 4 chars, then 3 / 2 / 1 the further back.
+		{"/home/dev/git-repo/github.com/QuietSugar/resumer", 44, "…/h/d/gi/git/Quie/resumer"},
+		{"/home/dev/working/project/infra-notes", 44, "…/h/de/wor/proj/infra-notes"},
+		// Too wide: the parent tightens to 3 chars, then the earliest
+		// components are dropped until it fits.
+		{"/home/dev/working/project/infra-notes", 15, "…/infra-notes"},
+		// A giant final component is cut to the budget as a last resort.
+		{"/x/y/" + strings.Repeat("a", 40), 15, "…/" + strings.Repeat("a", 13)},
+	}
+	for _, c := range cases {
+		if got := ShortenPath(c.in, c.budget); got != c.want {
+			t.Errorf("ShortenPath(%q, %d) = %q, want %q", c.in, c.budget, got, c.want)
+		}
+	}
+	// The result never exceeds the budget, and the final component survives
+	// whenever it can.
+	got := ShortenPath("/home/dev/git-repo/github.com/QuietSugar/resumer", 44)
+	if DisplayWidth(got) > 44 {
+		t.Errorf("result outgrew the budget: %q (%d cols)", got, DisplayWidth(got))
+	}
+	if !strings.HasSuffix(got, "/resumer") {
+		t.Errorf("last component lost: %q", got)
 	}
 }
 

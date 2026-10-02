@@ -235,14 +235,18 @@ func parseJSONL(path string) *session.Session {
 		Path:         path,
 		ProjectLabel: project,
 		Cwd:          cwd,
-		FirstTS:      firstTS,
-		LastTS:       lastTS,
-		Title:        title,
-		FirstPrompt:  firstPrompt,
-		LastPrompt:   lastPrompt,
-		Prompts:      prompts,
-		AsstCount:    assistantCount,
-		ResumeArgv:   []string{"codebuddy", "--resume", id},
+		// The encoded project bucket is CodeBuddy's native project key; there
+		// is no registry recording a root path, so WorkspaceRoot stays empty
+		// and grouping falls back to the session's cwd.
+		WorkspaceID: encodedProject,
+		FirstTS:     firstTS,
+		LastTS:      lastTS,
+		Title:       title,
+		FirstPrompt: firstPrompt,
+		LastPrompt:  lastPrompt,
+		Prompts:     prompts,
+		AsstCount:   assistantCount,
+		ResumeArgv:  []string{"codebuddy", "--resume", id},
 	}
 }
 

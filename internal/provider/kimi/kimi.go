@@ -85,12 +85,16 @@ func kimiBinAvailable() bool {
 type Provider struct {
 	indexCache map[string]string // sessionId → workDir, per resolved index path
 	indexSeen  map[string]bool
+	wsCache    map[string]wsMeta // workDirKey → workspace metadata, per resolved path
+	wsSeen     map[string]bool
 }
 
 func New() *Provider {
 	return &Provider{
 		indexCache: map[string]string{},
 		indexSeen:  map[string]bool{},
+		wsCache:    map[string]wsMeta{},
+		wsSeen:     map[string]bool{},
 	}
 }
 
@@ -105,8 +109,8 @@ func (p *Provider) IsAvailable() bool {
 
 // loadWorkDirs maps sessionId → workDir from session_index.jsonl. The index
 // is optional enrichment (it only provides the cwd / project label), so a
-// missing or corrupt file degrades silently instead of warning — unlike the
-// codex index, kimi titles come from state.json and survive without it.
+// missing or corrupt file degrades silently instead of warning — kimi titles
+// come from state.json and survive without it.
 func (p *Provider) loadWorkDirs() map[string]string {
 	path := indexFile()
 	if p.indexSeen[path] {
@@ -133,6 +137,51 @@ func (p *Provider) loadWorkDirs() map[string]string {
 	p.indexSeen[path] = true
 	p.indexCache = out
 	return out
+}
+
+// wsMeta is one entry of workspaces.json. The file is an object keyed by the
+// same `wd_<slug>_<sha>` bucket names used under sessions/.
+type wsMeta struct {
+	Root string `json:"root"`
+	Name string `json:"name"`
+}
+
+type workspaceIndex struct {
+	Version    int               `json:"version"`
+	Workspaces map[string]wsMeta `json:"workspaces"`
+}
+
+// loadWorkspaces maps workDirKey → metadata from workspaces.json. The file is
+// undocumented upstream, so it is optional enrichment: a missing, corrupt, or
+// differently-shaped file degrades silently and grouping falls back to the
+// session's cwd.
+func (p *Provider) loadWorkspaces() map[string]wsMeta {
+	path := filepath.Join(kimiHome(), "workspaces.json")
+	if p.wsSeen[path] {
+		return p.wsCache
+	}
+	out := map[string]wsMeta{}
+	if f, err := os.Open(path); err == nil {
+		var idx workspaceIndex
+		if json.NewDecoder(f).Decode(&idx) == nil && idx.Workspaces != nil {
+			out = idx.Workspaces
+		}
+		f.Close()
+	}
+	p.wsSeen[path] = true
+	p.wsCache = out
+	return out
+}
+
+// workspaceKey derives the sessions/ bucket name from a session directory path
+// (`<root>/<workDirKey>/<sessionId>`). Returns "" when dir is not nested under
+// a bucket.
+func workspaceKey(dir string) string {
+	key := filepath.Base(filepath.Dir(dir))
+	if key == "sessions" || key == "." || key == string(filepath.Separator) {
+		return ""
+	}
+	return key
 }
 
 type contentBlock struct {
@@ -197,7 +246,8 @@ func extractText(raw json.RawMessage) string {
 }
 
 // isRealPrompt filters synthetic/system-injected user turns. Kimi marks such
-// content with angle-bracket tags (same convention Claude Code uses).
+// content with angle-bracket tags, the convention the Claude-Code-derived
+// CLIs share.
 func isRealPrompt(txt string) bool {
 	s := strings.TrimSpace(txt)
 	return s != "" && !strings.HasPrefix(s, "<")
@@ -445,6 +495,18 @@ func rawText(raw json.RawMessage) string {
 	return s
 }
 
+// isUnusedSession reports whether a Kimi session holds no conversation content:
+// no parsed prompts, no completed turns, and only a placeholder or absent
+// title. Kimi derives the title from the first prompt, so an unused session
+// keeps the "New Session" placeholder or carries no title at all.
+func isUnusedSession(title, lastPrompt string, prompts []session.Prompt, asstCount int) bool {
+	if len(prompts) > 0 || asstCount > 0 || strings.TrimSpace(lastPrompt) != "" {
+		return false
+	}
+	t := strings.TrimSpace(title)
+	return t == "" || t == "New Session"
+}
+
 // parseSessionDir reads one session directory (state.json + main wire.jsonl).
 // Returns nil when the directory is not a listable session: state.json is
 // missing/unreadable (a directory without it is not a session), or state.json
@@ -583,6 +645,14 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 		}
 	}
 
+	// Workspace identity: the sessions/ bucket is the native workspace key;
+	// workspaces.json optionally records its root directory.
+	workspaceID := workspaceKey(dir)
+	workspaceRoot := ""
+	if workspaceID != "" {
+		workspaceRoot = p.loadWorkspaces()[workspaceID].Root
+	}
+
 	subtitle := ""
 	if forkedFrom != "" {
 		short := forkedFrom
@@ -605,21 +675,34 @@ func (p *Provider) parseSessionDir(dir string) *session.Session {
 		title = lastPrompt // native Kimi session listings fall back to lastPrompt
 	}
 
+	// Kimi leaves an empty session directory behind when a session is opened but
+	// never used. Its own surfaces hide these "unused" sessions (the web list
+	// drops untitled "New Session" entries; the TUI picker hides the current
+	// empty one), so resumer must not offer them either. A session keeps a
+	// placeholder title ("New Session") or none at all until the first prompt
+	// derives a real one (see agent-core-v2 sessionMetadata/promptMetadata.ts
+	// isUntitled()).
+	if isUnusedSession(title, lastPrompt, prompts, asstCount) {
+		return nil
+	}
+
 	return &session.Session{
-		Source:       "kimi-code",
-		SessionID:    sessionID,
-		Path:         filepath.Join(dir, "state.json"),
-		ProjectLabel: projectLabel,
-		Cwd:          cwd,
-		FirstTS:      firstTS,
-		LastTS:       lastTS,
-		Title:        title,
-		Subtitle:     subtitle,
-		FirstPrompt:  firstPrompt,
-		LastPrompt:   lastPrompt,
-		Prompts:      prompts,
-		AsstCount:    asstCount,
-		ResumeArgv:   []string{"kimi", "--session", sessionID},
+		Source:        "kimi-code",
+		SessionID:     sessionID,
+		Path:          filepath.Join(dir, "state.json"),
+		ProjectLabel:  projectLabel,
+		Cwd:           cwd,
+		WorkspaceID:   workspaceID,
+		WorkspaceRoot: workspaceRoot,
+		FirstTS:       firstTS,
+		LastTS:        lastTS,
+		Title:         title,
+		Subtitle:      subtitle,
+		FirstPrompt:   firstPrompt,
+		LastPrompt:    lastPrompt,
+		Prompts:       prompts,
+		AsstCount:     asstCount,
+		ResumeArgv:    []string{"kimi", "--session", sessionID},
 	}
 }
 

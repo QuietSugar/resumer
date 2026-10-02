@@ -10,32 +10,37 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/QuietSugar/resumer/internal/cwd"
 	"github.com/QuietSugar/resumer/internal/session"
 	"github.com/QuietSugar/resumer/internal/textutil"
 )
 
 // Compact fixed-width columns keep the session list readable in narrow terminals.
 const (
-	colLast    = 7
-	colBadge   = 7
-	colProject = 16
-	colTitle   = 24
+	colLast  = 7
+	colAgent = 9 // widest full provider name: "codebuddy" / "kimi-code"
+	colTitle = 40
 )
 
 var (
 	badgeStyle = map[string]lipgloss.Style{
-		"claude-code": lipgloss.NewStyle().Foreground(lipgloss.Color("2")), // green
-		"codebuddy":   lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
-		"codex":       lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
-		"kimi-code":   lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
-		"opencode":    lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // blue
+		"codebuddy": lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
+		"kimi-code": lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
+		"opencode":  lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // blue
 	}
-	dimStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	colHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Bold(true)
-	selectedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
-	cursorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
-	normalStyle    = lipgloss.NewStyle()
+	dimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	colHeaderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Bold(true)
+	groupHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Bold(true)
+	selectedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
+	cursorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
+	normalStyle      = lipgloss.NewStyle()
+	// volumeStyle is a heat ramp for the conversation-weight bar: the bigger
+	// the session, the hotter the color.
+	volumeStyle = map[string]lipgloss.Style{
+		" ": normalStyle,
+		"▁": dimStyle,
+		"▄": lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+		"█": lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true),
+	}
 )
 
 // ColumnHeader renders the list's column header, aligned to the fixed columns
@@ -45,8 +50,7 @@ var (
 func ColumnHeader() string {
 	head := strings.Join([]string{
 		textutil.PadDisplay("age", colLast),
-		textutil.PadDisplay("src", colBadge),
-		textutil.PadDisplay("project", colProject),
+		textutil.PadDisplay("agent", colAgent),
 		textutil.PadDisplay("title", colTitle),
 	}, " ")
 	return colHeaderStyle.Render("  " + head)
@@ -61,6 +65,28 @@ type sessionItem struct {
 // first prompt, and title/subtitle.
 func (i sessionItem) FilterValue() string {
 	return i.s.ProjectLabel + " " + i.s.FirstPrompt + " " + i.s.Title + " " + i.s.Subtitle
+}
+
+// groupHeaderItem is a non-selectable workspace header row. Its FilterValue is
+// empty so a non-empty filter drops it, leaving a flat list of matches.
+type groupHeaderItem struct {
+	count   int
+	path    string
+	deleted bool
+}
+
+func (i groupHeaderItem) FilterValue() string { return "" }
+
+func (i groupHeaderItem) String() string {
+	noun := "sessions"
+	if i.count == 1 {
+		noun = "session"
+	}
+	line := fmt.Sprintf("%d %s  ·  %s", i.count, noun, i.path)
+	if i.deleted {
+		line += "  " + textutil.DirDeletedLabel
+	}
+	return line
 }
 
 // rowDelegate renders one session per line in the fixed-column layout.
@@ -92,34 +118,22 @@ func formatLastActivity(ts string, now time.Time) string {
 }
 
 func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	it, ok := item.(sessionItem)
-	if !ok {
+	switch it := item.(type) {
+	case groupHeaderItem:
+		line := groupHeaderStyle.Render(it.String())
+		fmt.Fprint(w, lipgloss.NewStyle().MaxWidth(m.Width()).Render(line))
 		return
+	case sessionItem:
+		d.renderSession(w, m, index, &it.s)
 	}
-	s := &it.s
+}
 
+func (d rowDelegate) renderSession(w io.Writer, m list.Model, index int, s *session.Session) {
 	last := textutil.PadDisplay(formatLastActivity(s.LastTS, time.Now()), colLast)
-	badgeText := "[" + s.Source + "]"
-	if s.Source == "claude-code" {
-		badgeText = "[cc]"
-	}
-	if s.Source == "codebuddy" {
-		badgeText = "[cb]"
-	}
-	if s.Source == "kimi-code" {
-		badgeText = "[kimi]"
-	}
-	if s.Source == "opencode" {
-		badgeText = "[oc]"
-	}
-	badge := badgeStyle[s.Source].Render(textutil.PadDisplay(badgeText, colBadge))
-	projLabel := s.ProjectLabel
-	if cwd.Missing(s) {
-		projLabel = textutil.DirDeletedLabel
-	}
-	proj := textutil.PadDisplay(textutil.TrimDisplay(projLabel, colProject), colProject)
+	agent := badgeStyle[s.Source].Render(textutil.PadDisplay(s.Source, colAgent))
 	title := textutil.PadDisplay(textutil.TrimDisplay(s.Title, colTitle), colTitle)
-	marker := textutil.PadDisplay(textutil.VolumeMarker(s.AsstCount+len(s.Prompts)), 2)
+	glyph := textutil.VolumeMarker(s.AsstCount + len(s.Prompts))
+	marker := volumeStyle[glyph].Render(textutil.PadDisplay(glyph, 2))
 
 	selected := index == m.Index()
 	cursor := "  "
@@ -129,8 +143,8 @@ func (d rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 		rowStyle = selectedStyle
 	}
 
-	row := fmt.Sprintf("%s%s %s %s %s %s",
-		cursor, dimStyle.Render(last), badge, rowStyle.Render(proj), dimStyle.Render(title), marker)
+	row := fmt.Sprintf("%s%s %s %s %s",
+		cursor, dimStyle.Render(last), agent, rowStyle.Render(title), marker)
 
 	// Clip to the list's width so long rows never wrap and break the layout.
 	fmt.Fprint(w, lipgloss.NewStyle().MaxWidth(m.Width()).Render(row))

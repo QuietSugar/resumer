@@ -1,4 +1,0 @@
-{"id":"019cccc1-1111-7000-8000-000000000001","thread_name":"Codex Fixture One Thread","updated_at":"2026-04-15T05:02:00.000Z"}
-{not valid json at all} this line must be silently skipped by _load_index
-{"id":"019cccc9-9999-7000-8000-000000000099","thread_name":"","updated_at":"2026-04-15T09:00:00.000Z"}
-{"id":"019cccc3-3333-7000-8000-000000000003","thread_name":"Codex Three Named","updated_at":"2026-04-15T07:02:00.000Z"}

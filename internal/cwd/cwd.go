@@ -1,13 +1,13 @@
 // Package cwd answers one question for every consumer: where would this
 // session's resume command run, and can it run at all?
 //
-// claude --resume <uuid> derives the project dir from the CURRENT cwd by
+// codebuddy --resume <uuid> derives the project dir from the CURRENT cwd by
 // encoding it (/, space, ~ all become -) and looking under
-// ~/.claude/projects/<encoded>/. The cwd stored in the JSONL can be stale or
+// ~/.codebuddy/projects/<encoded>/. The cwd stored in the JSONL can be stale or
 // mismatched against the file's actual location (observed with iCloud and
 // Obsidian vault paths), making the resume fail. Defense: derive cwd from the
 // session file's encoded parent dir, which is always correct because it is
-// where claude stored the file.
+// where codebuddy stored the file.
 //
 // The list renderer, the TUI, and the exec dispatcher all go through Resolve,
 // so a row flagged as unresumable is exactly a row Enter will refuse — the
@@ -27,7 +27,7 @@ const maxWalkDepth = 15
 
 var cwdReplacer = strings.NewReplacer("/", "-", " ", "-", "~", "-")
 
-// encodeCwd mimics Claude Code's cwd → project-dir encoding.
+// encodeCwd mimics CodeBuddy's cwd → project-dir encoding.
 func encodeCwd(path string) string {
 	return "-" + cwdReplacer.Replace(strings.TrimLeft(path, "/"))
 }
@@ -46,7 +46,7 @@ func isDir(path string) bool {
 // An empty dir with ok == true means "cwd unknown": run from wherever resumer
 // was started.
 func Resolve(s *session.Session) (dir string, ok bool) {
-	if s.Source == "claude-code" || s.Source == "codebuddy" {
+	if s.Source == "codebuddy" {
 		dir = ResolveExecCwd(s.Path, s.Cwd)
 	}
 	if dir == "" {

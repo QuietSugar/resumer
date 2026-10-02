@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "workspaces": {
+    "wd_tmp-resumer-fixtures-kimi-one_aaaaaaaaaaaa": {
+      "root": "/tmp/resumer-fixtures/kimi-one",
+      "name": "kimi-one"
+    },
+    "wd_tmp-resumer-fixtures-kimi-two_bbbbbbbbbbbb": {
+      "root": "/tmp/resumer-fixtures/kimi-two",
+      "name": "kimi-two"
+    },
+    "wd_tmp-resumer-fixtures-kimi-four_eeeeeeeeeeee": {
+      "root": "/tmp/resumer-fixtures/kimi-four",
+      "name": "kimi-four"
+    },
+    "wd_stray-bucket_dddddddddddd": {
+      "root": "/tmp/resumer-fixtures/stray",
+      "name": "stray"
+    }
+  }
+}

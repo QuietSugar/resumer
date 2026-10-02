@@ -82,6 +82,12 @@ func TestFixtureParsing(t *testing.T) {
 	if one.ProjectLabel != "kimi-one" {
 		t.Errorf("project = %q", one.ProjectLabel)
 	}
+	if one.WorkspaceID != "wd_tmp-resumer-fixtures-kimi-one_aaaaaaaaaaaa" {
+		t.Errorf("workspace id = %q", one.WorkspaceID)
+	}
+	if one.WorkspaceRoot != "/tmp/resumer-fixtures/kimi-one" {
+		t.Errorf("workspace root = %q", one.WorkspaceRoot)
+	}
 	if one.Title != "Kimi Fixture One" {
 		t.Errorf("title from state.json = %q", one.Title)
 	}
@@ -162,8 +168,17 @@ func TestSessionWithoutIndexEntryOrWire(t *testing.T) {
 	if three.ProjectLabel != "(unknown)" {
 		t.Errorf("project = %q", three.ProjectLabel)
 	}
-	if three.Title != "" {
-		t.Errorf("title = %q, want empty", three.Title)
+	// The bucket key is always available as the native workspace id, but this
+	// bucket is deliberately absent from workspaces.json, so the root stays
+	// empty and grouping falls back to the (empty) cwd.
+	if three.WorkspaceID != "wd_tmp-resumer-fixtures-kimi-three_cccccccccc" {
+		t.Errorf("workspace id = %q", three.WorkspaceID)
+	}
+	if three.WorkspaceRoot != "" {
+		t.Errorf("workspace root = %q, want empty without a workspaces.json entry", three.WorkspaceRoot)
+	}
+	if three.Title != "Kimi ISO No-Wire" {
+		t.Errorf("title = %q, want the state.json title", three.Title)
 	}
 	if len(three.Prompts) != 0 || three.AsstCount != 0 {
 		t.Errorf("prompts = %+v, asst = %d; missing wire.jsonl must yield none",
@@ -173,6 +188,20 @@ func TestSessionWithoutIndexEntryOrWire(t *testing.T) {
 		three.LastTS != "2026-04-15T04:45:00.000Z" {
 		t.Errorf("timestamps = %q .. %q, want state.json values",
 			three.FirstTS, three.LastTS)
+	}
+}
+
+// An opened-but-unused session leaves a state.json and a lifecycle-only wire
+// stream behind. Kimi's own surfaces hide these (the web list drops untitled
+// "New Session" entries), so resumer must not list them.
+func TestUnusedSessionNotListed(t *testing.T) {
+	sessions := listAll(t)
+	if _, ok := sessions["dddd0005-5555-7000-8000-000000000005"]; ok {
+		t.Error("unused kimi session (no title, no prompts, lifecycle-only wire) must not be listed")
+	}
+	// A session with a title but no wire at all is still a real session.
+	if _, ok := sessions["dddd0003-3333-7000-8000-000000000003"]; !ok {
+		t.Error("titled session without a wire stream should still be listed")
 	}
 }
 
@@ -380,6 +409,14 @@ func TestISOTimestampsAndWorkDirParsed(t *testing.T) {
 	}
 	if s.ProjectLabel != "deploy" {
 		t.Errorf("project label = %q, want %q", s.ProjectLabel, "deploy")
+	}
+	// No workspaces.json in this home: the native id still comes from the
+	// bucket, but there is no recorded root to enrich it with.
+	if s.WorkspaceID == "" {
+		t.Error("workspace id should come from the sessions/ bucket key")
+	}
+	if s.WorkspaceRoot != "" {
+		t.Errorf("workspace root = %q, want empty without workspaces.json", s.WorkspaceRoot)
 	}
 	// ISO timestamps are passed through as written (same convention as the
 	// snake_case created_at/updated_at path), milliseconds included.

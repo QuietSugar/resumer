@@ -60,7 +60,7 @@ func TestProviderToggle(t *testing.T) {
 	if strings.Contains(out, `"opencode"`) {
 		t.Errorf("disabled opencode still scanned:\n%s", out)
 	}
-	if !strings.Contains(out, `"claude-code"`) {
+	if !strings.Contains(out, `"codebuddy"`) {
 		t.Errorf("other providers lost by the toggle:\n%s", out)
 	}
 
@@ -91,7 +91,7 @@ func TestProviderToggleAllDisabled(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	env := append(fixtureEnv(t), "RESUMER_CONFIG="+cfgPath)
 
-	for _, name := range []string{"claude-code", "codebuddy", "codex", "kimi-code", "opencode"} {
+	for _, name := range []string{"codebuddy", "kimi-code", "opencode"} {
 		if out, code := runBin(t, env, "provider", "off", name); code != 0 {
 			t.Fatalf("provider off %s: exit=%d out=%q", name, code, out)
 		}

@@ -30,8 +30,8 @@ if ! command -v go >/dev/null; then
   echo "error: missing dependency: go (https://go.dev/dl/ or brew install go)"
   exit 2
 fi
-if [[ ! -x "$REPO_ROOT/tests/mock-bin/codex" ]]; then
-  echo "error: missing executable: $REPO_ROOT/tests/mock-bin/codex"
+if [[ ! -x "$REPO_ROOT/tests/mock-bin/codebuddy" ]]; then
+  echo "error: missing executable: $REPO_ROOT/tests/mock-bin/codebuddy"
   exit 2
 fi
 if (( RUN_VHS )) && ! command -v vhs >/dev/null; then

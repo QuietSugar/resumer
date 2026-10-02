@@ -99,6 +99,10 @@ func TestSQLiteParsing(t *testing.T) {
 	if one.ProjectLabel != "oc-one" {
 		t.Errorf("project = %q", one.ProjectLabel)
 	}
+	// No workspace_id column value, so project_id supplies the native id.
+	if one.WorkspaceID != "proj-oc" {
+		t.Errorf("workspace id = %q, want project_id fallback", one.WorkspaceID)
+	}
 	if len(one.Prompts) != 0 {
 		// prompts are kept in agg only; Session.Prompts is not populated
 		t.Errorf("prompts slice should stay empty (render uses first/last), got %d", len(one.Prompts))
@@ -123,6 +127,19 @@ func TestSQLiteParsing(t *testing.T) {
 	if len(one.ResumeArgv) != 3 || one.ResumeArgv[0] != "opencode" ||
 		one.ResumeArgv[1] != "--session" || one.ResumeArgv[2] != one.SessionID {
 		t.Errorf("resume argv = %v", one.ResumeArgv)
+	}
+}
+
+// project_id "global" is opencode's sentinel for "not a real project"; it must
+// not surface as a workspace id.
+func TestGlobalProjectHasNoWorkspaceID(t *testing.T) {
+	sessions := listAll(t)
+	d := sessions["ses_dddddddddddddddddddddddddddd"]
+	if d.SessionID == "" {
+		t.Fatal("session with project_id=global missing")
+	}
+	if d.WorkspaceID != "" {
+		t.Errorf("workspace id = %q, want empty for the global sentinel", d.WorkspaceID)
 	}
 }
 
@@ -160,6 +177,10 @@ func TestLegacyOnlySession(t *testing.T) {
 	}
 	if leg.Cwd != "/tmp/resumer-fixtures/oc-two" || leg.ProjectLabel != "oc-two" {
 		t.Errorf("cwd/project = %q / %q", leg.Cwd, leg.ProjectLabel)
+	}
+	// workspace_id takes precedence over project_id.
+	if leg.WorkspaceID != "ws-legacy-eeee" {
+		t.Errorf("workspace id = %q, want ws-legacy-eeee", leg.WorkspaceID)
 	}
 	if leg.FirstPrompt != "legacy only first prompt" ||
 		leg.LastPrompt != "legacy only second prompt" {
@@ -208,6 +229,9 @@ func TestJSONFallbackSession(t *testing.T) {
 	}
 	if js.Cwd != "/tmp/resumer-fixtures/oc-json" || js.ProjectLabel != "oc-json" {
 		t.Errorf("cwd/project = %q / %q", js.Cwd, js.ProjectLabel)
+	}
+	if js.WorkspaceID != "proj-json" {
+		t.Errorf("workspace id = %q, want the JSON projectID", js.WorkspaceID)
 	}
 	if js.FirstPrompt != "opencode json fixture first prompt" {
 		t.Errorf("first prompt = %q", js.FirstPrompt)

@@ -16,13 +16,21 @@ type Session struct {
 	Path         string
 	ProjectLabel string
 	Cwd          string
-	FirstTS      string
-	LastTS       string
-	Title        string
-	Subtitle     string
-	FirstPrompt  string
-	LastPrompt   string
-	Prompts      []Prompt
+	// WorkspaceID is the provider-native workspace/project identifier when the
+	// provider exposes one (kimi: the on-disk `wd_<slug>_<hash>` bucket key;
+	// opencode: session.workspace_id, else project_id). "" when the provider has
+	// none.
+	WorkspaceID string
+	// WorkspaceRoot is the directory the provider records as the workspace root
+	// (kimi workspaces.json `root`). Optional enrichment; "" when unknown.
+	WorkspaceRoot string
+	FirstTS       string
+	LastTS        string
+	Title         string
+	Subtitle      string
+	FirstPrompt   string
+	LastPrompt    string
+	Prompts       []Prompt
 	// AsstCount is a provider-defined estimate of assistant-side activity.
 	// Providers may use different counting rules; the value can be inaccurate
 	// and is intended only as a rough indication of conversation size, not an

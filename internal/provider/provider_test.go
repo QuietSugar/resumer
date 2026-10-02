@@ -21,9 +21,9 @@ func ids(ss []session.Session) []string {
 
 func TestSortSessionsDescending(t *testing.T) {
 	ss := []session.Session{
-		mk("2026-04-15T01:00:00Z", "claude-code", "a"),
-		mk("2026-04-15T07:00:00Z", "codex", "b"),
-		mk("2026-04-15T03:00:00Z", "claude-code", "c"),
+		mk("2026-04-15T01:00:00Z", "kimi-code", "a"),
+		mk("2026-04-15T07:00:00Z", "opencode", "b"),
+		mk("2026-04-15T03:00:00Z", "kimi-code", "c"),
 	}
 	SortSessions(ss, false)
 	got := ids(ss)
@@ -37,9 +37,9 @@ func TestSortSessionsDescending(t *testing.T) {
 
 func TestSortSessionsAscendingIsReverse(t *testing.T) {
 	ss := []session.Session{
-		mk("2026-04-15T01:00:00Z", "claude-code", "a"),
-		mk("2026-04-15T07:00:00Z", "codex", "b"),
-		mk("2026-04-15T03:00:00Z", "claude-code", "c"),
+		mk("2026-04-15T01:00:00Z", "kimi-code", "a"),
+		mk("2026-04-15T07:00:00Z", "opencode", "b"),
+		mk("2026-04-15T03:00:00Z", "kimi-code", "c"),
 	}
 	SortSessions(ss, true)
 	got := ids(ss)
@@ -57,7 +57,7 @@ func TestSortSessionsStrictWeakOrderingOnTies(t *testing.T) {
 	// equal pairs — regression guard for the ascending !less bug).
 	var ss []session.Session
 	for i := 0; i < 50; i++ {
-		ss = append(ss, mk("2026-04-15T01:00:00Z", "claude-code", "same"))
+		ss = append(ss, mk("2026-04-15T01:00:00Z", "kimi-code", "same"))
 	}
 	SortSessions(ss, true)
 	SortSessions(ss, false)
@@ -66,8 +66,8 @@ func TestSortSessionsStrictWeakOrderingOnTies(t *testing.T) {
 	}
 	// Distinct paths on equal (ts, source): deterministic tiebreak.
 	tie := []session.Session{
-		mk("2026-04-15T01:00:00Z", "claude-code", "z"),
-		mk("2026-04-15T01:00:00Z", "claude-code", "a"),
+		mk("2026-04-15T01:00:00Z", "kimi-code", "z"),
+		mk("2026-04-15T01:00:00Z", "kimi-code", "a"),
 	}
 	SortSessions(tie, false)
 	if !sort.SliceIsSorted(tie, func(i, j int) bool { return tie[i].Path < tie[j].Path }) {

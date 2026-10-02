@@ -1,4 +1,4 @@
-# resumer demo — unified list + native TUI picker with [cc]/[codex] badges.
+# resumer demo — unified list + native TUI picker, grouped by workspace.
 #
 # Records against SYNTHETIC fixtures (tests/demo/gen-fixtures.sh), never real
 # session data — the GIF is committed and public. Timestamps are generated
@@ -15,12 +15,12 @@ Set TypingSpeed 50ms
 Set Theme "Dracula"
 
 Hide
-Type "./tests/demo/gen-fixtures.sh >/dev/null && source tests/output/demo-fixtures/env.sh && clear"
+Type "./tests/demo/gen-fixtures.sh >/dev/null && source tests/output/demo-fixtures/env.sh && mkdir -p /Users/demo/code/api-server /Users/demo/code/webapp /Users/demo/code/data-pipeline /Users/demo/dotfiles && clear"
 Enter
 Sleep 1s
 Show
 
-# 1. Merged list — [cc]/[codex] badges interleaved, CJK columns aligned.
+# 1. Merged list — full agent names, sessions grouped by workspace.
 Type "resumer list"
 Enter
 Sleep 3s

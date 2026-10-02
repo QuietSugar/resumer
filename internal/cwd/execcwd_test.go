@@ -42,7 +42,7 @@ func newSandbox(t *testing.T) sandbox {
 		t.Fatal(err)
 	}
 	encoded := encodeCwd(targetDir)
-	projectsRoot := filepath.Join(tmpRoot, "fake-claude-projects")
+	projectsRoot := filepath.Join(tmpRoot, "fake-codebuddy-projects")
 	sessionDir := filepath.Join(projectsRoot, encoded)
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatal(err)

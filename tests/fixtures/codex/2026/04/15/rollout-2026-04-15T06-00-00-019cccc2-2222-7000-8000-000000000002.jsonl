@@ -1,5 +1,0 @@
-{"timestamp":"2026-04-15T06:00:00.000Z","type":"session_meta","payload":{"id":"019cccc2-2222-7000-8000-000000000002","timestamp":"2026-04-15T06:00:00.000Z","cwd":"/tmp/resumer-fixtures/codex-two","originator":"codex-tui","cli_version":"0.120.0"}}
-{"timestamp":"2026-04-15T06:00:05.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"system-developer-injected"}]}}
-{"timestamp":"2026-04-15T06:00:06.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"AGENTS.md injection that must be filtered out"}]}}
-{"timestamp":"2026-04-15T06:00:10.000Z","type":"event_msg","payload":{"type":"user_message","message":"real user prompt for codex two","images":[]}}
-{"timestamp":"2026-04-15T06:00:40.000Z","type":"event_msg","payload":{"type":"task_complete"}}

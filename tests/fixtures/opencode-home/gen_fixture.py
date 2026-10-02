@@ -6,7 +6,8 @@ session metadata, conversations are dual-projected into `session_message`
 (durable pipeline) and the legacy `message`+`part` pair (v1-compat layer).
 The fixture exercises: dual-write dedupe, pre-upgrade sessions that exist only
 in the legacy pair, archived/child skipping, an oversized overflow-page blob,
-and (via storage/) the pre-1.1 JSON layout fallback.
+workspace/project identity (`project_id`/`workspace_id`, incl. the `global`
+sentinel), and (via storage/) the pre-1.1 JSON layout fallback.
 
 Usage: python3 gen_fixture.py opencode.db
 """
@@ -77,8 +78,8 @@ CREATE TABLE part (
 """
 
 def session_row(sid, project, slug, directory, title, created, updated,
-                parent=None, archived=None, diffs=None):
-    return (sid, project, None, parent, slug, directory, None, title, "1.18.33",
+                parent=None, archived=None, diffs=None, workspace=None):
+    return (sid, project, workspace, parent, slug, directory, None, title, "1.18.33",
             None, None, None, None, diffs, None, 0.0,
             0, 0, 0, 0, 0,
             None, None, None, None, created, updated, None, archived)
@@ -89,6 +90,9 @@ def main(path):
     db.executescript(SCHEMA)
 
     # --- sessions ---------------------------------------------------------
+    # Workspace identity: project_id is the native id (workspace_id wins when
+    # set); the literal "global" means "not a real project" and must not become
+    # a workspace id.
     # ses_aaaa: healthy dual-projected session (both table families hold the
     # same two turns — resumer must dedupe, not double-count).
     db.execute("INSERT INTO session VALUES (%s)" % ",".join("?" * 29),
@@ -107,15 +111,18 @@ def main(path):
                session_row(SES["cccc"], "proj-oc", "one", "/tmp/resumer-fixtures/oc-one",
                            "OpenCode Child Fixture", T["cccc_created"], T["cccc_updated"],
                            parent=SES["aaaa"]))
-    # ses_dddd: durable-projection-only session (newest → integration test target).
+    # ses_dddd: durable-projection-only session (newest → integration test
+    # target). project_id "global" is a sentinel, not a workspace id.
     db.execute("INSERT INTO session VALUES (%s)" % ",".join("?" * 29),
-               session_row(SES["dddd"], "proj-oc", "three", "/tmp/resumer-fixtures/oc-three",
+               session_row(SES["dddd"], "global", "three", "/tmp/resumer-fixtures/oc-three",
                            "OpenCode Fixture Three", T["dddd_created"], T["dddd_updated"]))
     # ses_eeee: pre-upgrade session — exists ONLY in the legacy message+part
-    # pair (no session_message rows, mirroring the missing backfill).
+    # pair (no session_message rows, mirroring the missing backfill). Carries a
+    # workspace_id, which takes precedence over project_id.
     db.execute("INSERT INTO session VALUES (%s)" % ",".join("?" * 29),
-               session_row(SES["eeee"], "proj-oc", "two", "/tmp/resumer-fixtures/oc-two",
-                           "OpenCode Legacy Session", T["eeee_created"], T["eeee_updated"]))
+               session_row(SES["eeee"], "proj-legacy", "two", "/tmp/resumer-fixtures/oc-two",
+                           "OpenCode Legacy Session", T["eeee_created"], T["eeee_updated"],
+                           workspace="ws-legacy-eeee"))
 
     # --- session_message (durable projection) ------------------------------
     sm = [

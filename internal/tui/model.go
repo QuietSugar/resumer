@@ -8,6 +8,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -16,9 +17,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/QuietSugar/resumer/internal/cwd"
 	"github.com/QuietSugar/resumer/internal/provider"
 	"github.com/QuietSugar/resumer/internal/render"
 	"github.com/QuietSugar/resumer/internal/session"
+	"github.com/QuietSugar/resumer/internal/textutil"
+	"github.com/QuietSugar/resumer/internal/workspace"
 )
 
 const helpLine = "↑↓ browse · / filter · tab source · ctrl-s sort · ctrl-r rescan · enter resume · esc cancel"
@@ -60,6 +64,17 @@ type Model struct {
 	generation int
 	loaded     bool
 	warnings   []string
+
+	// selectable holds the list indices of session rows (group-header rows are
+	// not selectable). It is only valid while the list is unfiltered.
+	selectable []int
+	workspaces int
+
+	// pendingSelect/pendingID/pendingSrc remember the selection to restore once
+	// an active filter's new match set has been applied (SetItems defers it).
+	pendingSelect bool
+	pendingID     string
+	pendingSrc    string
 
 	selected   *session.Session
 	noSessions bool
@@ -136,29 +151,140 @@ func (m *Model) currentSessions() []session.Session {
 	return out
 }
 
-func (m *Model) applyItems() {
+// applyItems rebuilds the list from the current sessions, grouping by
+// workspace, and restores the previous selection by identity. It returns the
+// list command that must be forwarded so an active filter is re-applied.
+func (m *Model) applyItems() tea.Cmd {
 	selectedID, selectedSource := "", ""
 	if selected, ok := m.list.SelectedItem().(sessionItem); ok {
 		selectedID, selectedSource = selected.s.SessionID, selected.s.Source
 	}
+	m.pendingSelect = selectedID != "" || selectedSource != ""
+	m.pendingID, m.pendingSrc = selectedID, selectedSource
 
 	sessions := m.currentSessions()
-	items := make([]list.Item, len(sessions))
-	for i, s := range sessions {
-		items[i] = sessionItem{s: s}
-	}
-	m.list.SetItems(items)
-	selected := false
-	for i, s := range sessions {
-		if s.SessionID == selectedID && s.Source == selectedSource {
-			m.list.Select(i)
-			selected = true
-			break
+	groups := workspace.GroupBy(sessions)
+	items := make([]list.Item, 0, len(sessions)+len(groups))
+	m.selectable = m.selectable[:0]
+	for _, g := range groups {
+		items = append(items, groupHeaderItem{
+			count:   len(g.Sessions),
+			path:    groupPath(g, pathBudget(m.width)),
+			deleted: len(g.Sessions) > 0 && cwd.Missing(&g.Sessions[0]),
+		})
+		for i := range g.Sessions {
+			m.selectable = append(m.selectable, len(items))
+			items = append(items, sessionItem{s: g.Sessions[i]})
 		}
 	}
-	if !selected && len(items) > 0 {
+	m.workspaces = len(groups)
+	cmd := m.list.SetItems(items)
+
+	// Unfiltered: VisibleItems is the item slice we just built, so selection can
+	// be restored now. Filtered: SetItems schedules a fresh fuzzy match, so the
+	// filtered index space is only valid once FilterMatchesMsg arrives — defer.
+	if m.list.FilterState() == list.Unfiltered {
+		m.restoreSelection(selectedID, selectedSource)
+		m.pendingSelect = false
+	}
+	return cmd
+}
+
+// pathBudget caps the workspace header's directory display, derived from the
+// terminal width so narrow terminals abbreviate harder.
+func pathBudget(width int) int {
+	if width <= 0 {
+		return 44
+	}
+	b := width * 2 / 5
+	if b < 24 {
+		return 24
+	}
+	if b > 56 {
+		return 56
+	}
+	return b
+}
+
+// groupPath renders a workspace header's directory, progressively abbreviated
+// to the given display budget, or the native id / placeholder when no directory
+// is known.
+func groupPath(g workspace.Group, budget int) string {
+	if g.Dir != "" {
+		return textutil.ShortenPath(g.Dir, budget)
+	}
+	if g.WorkspaceID != "" {
+		return g.WorkspaceID
+	}
+	return "(no workspace)"
+}
+
+// restoreSelection selects the session matching (id, src) in the list's current
+// (possibly filtered) index space, falling back to the first visible session.
+func (m *Model) restoreSelection(id, src string) {
+	for i, it := range m.list.VisibleItems() {
+		if si, ok := it.(sessionItem); ok && si.s.SessionID == id && si.s.Source == src {
+			m.list.Select(i)
+			m.refreshPreview()
+			return
+		}
+	}
+	m.selectFirstVisible()
+}
+
+// selectFirstVisible moves the cursor to the first selectable session row.
+func (m *Model) selectFirstVisible() {
+	items := m.list.VisibleItems()
+	for i, it := range items {
+		if _, ok := it.(sessionItem); ok {
+			m.list.Select(i)
+			m.refreshPreview()
+			return
+		}
+	}
+	if len(items) > 0 {
 		m.list.Select(0)
 	}
+	m.refreshPreview()
+}
+
+// moveCursor steps the selection by delta selectable rows, skipping headers.
+func (m *Model) moveCursor(delta int) {
+	if len(m.selectable) == 0 {
+		return
+	}
+	idx := m.list.Index()
+	j := sort.SearchInts(m.selectable, idx)
+	exact := j < len(m.selectable) && m.selectable[j] == idx
+	var k int
+	switch {
+	case exact:
+		k = j + delta
+	case delta < 0:
+		k = j - 1
+	default:
+		k = j
+	}
+	if k < 0 {
+		k = 0
+	}
+	if k >= len(m.selectable) {
+		k = len(m.selectable) - 1
+	}
+	m.list.Select(m.selectable[k])
+	m.refreshPreview()
+}
+
+// moveToEdge jumps to the first or last selectable session.
+func (m *Model) moveToEdge(end bool) {
+	if len(m.selectable) == 0 {
+		return
+	}
+	k := 0
+	if end {
+		k = len(m.selectable) - 1
+	}
+	m.list.Select(m.selectable[k])
 	m.refreshPreview()
 }
 
@@ -222,6 +348,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pending > 0 {
 			m.pending--
 		}
+		var cmd tea.Cmd
 		if msg.err != nil {
 			m.warnings = append(m.warnings,
 				fmt.Sprintf("warning: %s provider failed: %v", msg.name, msg.err))
@@ -234,7 +361,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.all = append(kept, msg.sessions...)
-			m.applyItems()
+			cmd = m.applyItems()
 		}
 		if m.pending == 0 {
 			firstLoad := !m.loaded
@@ -244,7 +371,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
-		return m, nil
+		return m, cmd
+
+	// SetItems defers re-filtering to this message; once it lands the filtered
+	// index space is valid, so restore the selection that applyItems deferred.
+	case list.FilterMatchesMsg:
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		if m.pendingSelect {
+			m.restoreSelection(m.pendingID, m.pendingSrc)
+			m.pendingSelect = false
+		}
+		return m, cmd
 
 	case spinner.TickMsg:
 		if m.pending > 0 {
@@ -284,14 +422,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "ctrl+s":
 			m.sortAsc = !m.sortAsc
-			m.applyItems()
-			return m, nil
+			return m, m.applyItems()
 		case "tab":
 			if len(m.sources) > 1 {
 				m.sourceIdx = (m.sourceIdx + 1) % len(m.sources)
-				m.applyItems()
+				return m, m.applyItems()
 			}
 			return m, nil
+		}
+
+		// Unfiltered: navigation must skip group-header rows, so drive the
+		// cursor over the selectable index list ourselves. While filtering
+		// (or filtered), headers are gone and the list owns navigation.
+		if m.list.FilterState() == list.Unfiltered {
+			switch msg.String() {
+			case "up", "k":
+				m.moveCursor(-1)
+				return m, nil
+			case "down", "j":
+				m.moveCursor(1)
+				return m, nil
+			case "pgup", "left", "h", "b":
+				m.moveCursor(-m.list.Paginator.PerPage)
+				return m, nil
+			case "pgdown", "right", "l", "f":
+				m.moveCursor(m.list.Paginator.PerPage)
+				return m, nil
+			case "home", "g":
+				m.moveToEdge(false)
+				return m, nil
+			case "end", "G":
+				m.moveToEdge(true)
+				return m, nil
+			}
 		}
 	}
 
@@ -362,7 +525,8 @@ func (m Model) View() string {
 	if src == "" {
 		src = "all"
 	}
-	status := fmt.Sprintf("%d sessions · source: %s", len(m.list.Items()), src)
+	status := fmt.Sprintf("%d sessions · %d workspaces · source: %s",
+		len(m.selectable), m.workspaces, src)
 	if m.pending > 0 {
 		status = m.spin.View() + " loading · " + status
 	}

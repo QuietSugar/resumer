@@ -44,12 +44,12 @@ func TestResolveRecoversStaleStoredCwd(t *testing.T) {
 	sessionPath := filepath.Join(encoded, "sess.jsonl")
 
 	s := session.Session{
-		Source: "claude-code",
+		Source: "codebuddy",
 		Path:   sessionPath,
 		Cwd:    filepath.Join(root, "vanished project"), // stale on purpose
 	}
 	if got, ok := Resolve(&s); !ok || got != target {
-		t.Errorf("claude-code stale cwd: got (%q, %v), want (%q, true)", got, ok, target)
+		t.Errorf("codebuddy stale cwd: got (%q, %v), want (%q, true)", got, ok, target)
 	}
 	if Missing(&s) {
 		t.Error("a recoverable session must not be flagged as missing")

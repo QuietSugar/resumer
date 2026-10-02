@@ -16,9 +16,10 @@
 
 1. Add a package under `internal/provider/<name>` implementing `provider.Provider` (`Name`, `Badge`, `BadgeANSI`, `IsAvailable`, `ListSessions`, `LoadDetail`).
 2. Parse only the metadata required by `session.Session`; avoid retaining full conversation content beyond prompt fields already used by the picker.
-3. Register the provider in `internal/cli/cli.go`, add a resume command and provider-specific cwd handling if required, and provide an install/help link.
-4. Add synthetic fixtures and parser tests for titles, prompts, timestamps, filters, missing/malformed records, and resume arguments.
-5. Add the provider to the README table and any relevant picker badge styles. Provider enable/disable should continue to work through the registry without special-case configuration logic.
+3. Populate workspace identity when the agent exposes it: set `Session.WorkspaceID` to the native workspace/project id and `Session.WorkspaceRoot` to its recorded root directory. When the agent has no native concept (only a working directory), leave both empty — grouping falls back to the session's `Cwd` (see `internal/workspace`). Never invent an id.
+4. Register the provider in `internal/cli/cli.go`, add a resume command and provider-specific cwd handling if required, and provide an install/help link.
+5. Add synthetic fixtures and parser tests for titles, prompts, timestamps, filters, missing/malformed records, and resume arguments.
+6. Add the provider to the README table and any relevant picker badge styles. Provider enable/disable should continue to work through the registry without special-case configuration logic.
 
 ## Validation
 

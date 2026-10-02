@@ -1,6 +1,6 @@
 # resumer
 
-> Browse & resume Claude Code, CodeBuddy, Codex, Kimi Code, and OpenCode sessions — one picker, zero dependencies.
+> Browse & resume CodeBuddy, Kimi Code, and OpenCode sessions — one picker, zero dependencies.
 
 ![resumer demo](docs/demo.gif)
 
@@ -26,20 +26,26 @@ macOS & Linux (arm64/amd64). Windows is on the roadmap.
 
 ```bash
 resumer              # interactive picker
-resumer list         # plain list, every session
+resumer list         # grouped by workspace, every session
 resumer --help       # everything else
 ```
 
 Picker keys: `↑↓` browse · `/` filter · `tab` cycle source · `ctrl-s` toggle sort ·
 `enter` resume · `esc` cancel. They are listed on the last line of the
-screen. The session list carries a one-line column header (`age` `src`
-`project` `title`) so the fixed-width rows are self-describing.
+screen. The session list carries a one-line column header (`age` `agent`
+`title`) so the fixed-width rows are self-describing, and sessions are grouped
+under a workspace row shaped like `2 sessions · …/h/d/g/g/Q/resumer` — session
+count first, then the abbreviated directory (leading components collapsed to
+their first letters, the final directory always in full). The trailing marker
+column is a rough conversation-weight bar, colored gray → yellow → red in the
+picker: blank <20 messages, `▁` 20–49, `▄` 50–149, `█` 150+.
 
 Useful flags (both picker and `list`): `--days N` (narrow to the last N days —
 **the default is no time limit, so every session is listed**), `--date YYYY-MM-DD`,
 `--all` (kept for compatibility; it is now the default), `--project foo`,
-`--source claude-code|codebuddy|codex|kimi-code|opencode`, `--limit N`. List mode adds
-`--json` and `--full [N]`. The `asst_count` JSON field and detail-preview
+`--source codebuddy|kimi-code|opencode`, `--limit N`. List mode adds
+`--no-group` (flat table instead of workspace groups), `--json`, and `--full [N]`.
+The `asst_count` JSON field and detail-preview
 assistant activity figure are provider-specific rough size estimates; counting
 rules differ and the values are not exact or directly comparable across providers.
 
@@ -47,6 +53,29 @@ The picker tips pane uses provider-specific built-in tips by default. To replace
 these with your own plain-text tips, create `~/.config/resumer/tips.md` or set
 `RESUMER_TIPS_FILE` to another file path. The file is read when the picker
 starts; a missing or blank file falls back to the built-in tips.
+
+## Workspaces
+
+`resumer list` and the picker group sessions by **workspace**: sessions opened in
+the same working directory are grouped together, across providers. A workspace
+header looks like:
+
+```
+── /home/xu/git-repo/my-project  ·  3 sessions  ·  codebuddy, kimi-code
+```
+
+The grouping key is the session's working directory, so a directory used from
+several agents lands in one group. When a provider records a native
+workspace/project identifier (Kimi Code's `wd_<slug>_<hash>` session bucket and
+`workspaces.json`; OpenCode's `workspace_id`/`project_id`), it is used as the
+group's identity — and as the last-resort key when no directory is known.
+Sessions with neither a directory nor a native id are shown under
+`(no workspace)`, scoped per provider.
+
+`--json` stays a flat array (add the `workspace_id`/`workspace_root` fields
+yourself if you need to group downstream). Use `resumer list --no-group` for the
+old flat table, or `--source NAME` to restrict to a single provider (no
+cross-provider merging then).
 
 ## Enabling / disabling providers
 
@@ -76,12 +105,9 @@ provider — the flag is a deliberate per-invocation request.
 
 | Provider | Session source | Resume command |
 |---|---|---|
-| Claude Code | `~/.claude/projects/**/*.jsonl` | `claude --resume <id>` |
 | CodeBuddy CLI | `~/.codebuddy/projects/**/*.jsonl` | `codebuddy --resume <id>` |
-| Codex CLI | `~/.codex/sessions/**/rollout-*.jsonl` | `codex resume <id>` |
 | Kimi Code CLI | `~/.kimi-code/sessions/<workDirKey>/<id>/` | `kimi --session <id>` |
 | OpenCode | `~/.local/share/opencode/opencode.db` (≤1.0: `storage/session/`) | `opencode --session <id>` |
-| Gemini CLI | roadmap | |
 
 For multi-agent format research, see [TokenTracker](https://github.com/xiufengsun/TokenTracker):
 the inspected snapshot's README lists 42 supported AI tools, including CodeBuddy, and its
@@ -96,9 +122,14 @@ best-effort only (the opencode `storage/` JSON layout of ≤1.0 is kept as a
 fallback when no database exists). For real-machine validation steps,
 see [docs/real-world-testing.md](docs/real-world-testing.md).
 
+Kimi leaves an opened-but-unused session directory behind (a `state.json` with
+no title or prompt, and a `wire.jsonl` carrying only lifecycle events). resumer
+skips these, matching Kimi's own session list, so a directory you merely opened
+Kimi in does not show up as a session.
+
 resumer also fixes a real-world annoyance: when a session's stored cwd has gone
 stale (iCloud/Obsidian path drift), it re-derives the correct project directory
-from the session file location, so `claude --resume` actually works.
+from the session file location, so `codebuddy --resume` actually works.
 
 When a session's working directory has been deleted — the project was renamed,
 moved, or removed, or the session data was carried to another machine — that
@@ -132,7 +163,7 @@ TUI end to end (picker → filter → select → exec) against fixtures in
 
 Releases are automated: pushing a `v*` tag builds binaries via goreleaser.
 
-Roadmap: Gemini provider · Windows support.
+Roadmap: Windows support.
 
 </details>
 

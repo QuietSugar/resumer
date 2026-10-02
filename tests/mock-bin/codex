@@ -1,7 +1,0 @@
-#!/bin/bash
-# Mock codex binary for resumer QA.
-# Records invocation (pwd + args) into a log, then exits.
-LOG="${CODEX_MOCK_LOG:-/tmp/resumer-qa/codex-mock.log}"
-mkdir -p "$(dirname "$LOG")"
-echo "CALLED pwd=$PWD args=$*" > "$LOG"
-sleep 0.2

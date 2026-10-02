@@ -26,7 +26,7 @@ func captureStderr(t *testing.T, fn func()) string {
 func fakeBinDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "claude")
+	bin := filepath.Join(dir, "codebuddy")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +44,8 @@ func TestStateDirHonorsXDG(t *testing.T) {
 func TestMissingBinSkipsMessageAndSentinel(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmp)
-	t.Setenv("PATH", t.TempDir()) // empty dir — no claude on PATH
-	out := captureStderr(t, func() { maybeShowFirstRunStar("claude") })
+	t.Setenv("PATH", t.TempDir()) // empty dir — no codebuddy on PATH
+	out := captureStderr(t, func() { maybeShowFirstRunStar("codebuddy") })
 	if out != "" {
 		t.Errorf("no message expected when bin missing, got %q", out)
 	}
@@ -59,7 +59,7 @@ func TestPresentBinPrintsAndCreatesSentinel(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmp)
 	t.Setenv("PATH", fakeBinDir(t))
-	out := captureStderr(t, func() { maybeShowFirstRunStar("claude") })
+	out := captureStderr(t, func() { maybeShowFirstRunStar("codebuddy") })
 	if !strings.Contains(out, "⭐") || !strings.Contains(out, "github.com/QuietSugar/resumer") {
 		t.Errorf("star message missing: %q", out)
 	}
@@ -80,7 +80,7 @@ func TestSentinelPresentIsSilent(t *testing.T) {
 	if err := os.WriteFile(sentinel, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out := captureStderr(t, func() { maybeShowFirstRunStar("claude") })
+	out := captureStderr(t, func() { maybeShowFirstRunStar("codebuddy") })
 	if out != "" {
 		t.Errorf("message must not repeat when sentinel exists, got %q", out)
 	}

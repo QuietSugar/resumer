@@ -28,7 +28,7 @@ func TestFullBoxLabelsAssistantActivityAsApproximate(t *testing.T) {
 
 func TestRenderersOmitTokenAndCacheStatistics(t *testing.T) {
 	sessions := []session.Session{{
-		Source: "claude-code", SessionID: "fixture-session", ProjectLabel: "fixture",
+		Source: "codebuddy", SessionID: "fixture-session", ProjectLabel: "fixture",
 	}}
 	outputs := []string{
 		Index(sessions),
@@ -40,6 +40,50 @@ func TestRenderersOmitTokenAndCacheStatistics(t *testing.T) {
 		if strings.Contains(lower, "token") || strings.Contains(lower, "cache hit") {
 			t.Errorf("render output still contains usage statistics:\n%s", output)
 		}
+	}
+}
+
+func TestIndexGroupedMergesByDirectory(t *testing.T) {
+	shared := t.TempDir()
+	sessions := []session.Session{
+		{Source: "kimi-code", SessionID: "k1", ProjectLabel: filepath.Base(shared), Cwd: shared, FirstPrompt: "from kimi", LastTS: "2026-04-15T10:00:00Z"},
+		{Source: "opencode", SessionID: "o1", ProjectLabel: filepath.Base(shared), Cwd: shared, FirstPrompt: "from opencode", LastTS: "2026-04-15T09:00:00Z"},
+		{Source: "kimi-code", SessionID: "k2", ProjectLabel: "other", Cwd: t.TempDir(), FirstPrompt: "elsewhere", LastTS: "2026-04-15T08:00:00Z"},
+	}
+	out := IndexGrouped(sessions)
+	if n := strings.Count(out, "── "); n != 2 {
+		t.Fatalf("want 2 workspace headers, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, "2 sessions") {
+		t.Errorf("merged group should report 2 sessions:\n%s", out)
+	}
+	if !strings.Contains(out, "kimi-code, opencode") {
+		t.Errorf("merged header should list both providers, sorted:\n%s", out)
+	}
+	if !strings.Contains(out, "1 session  ·  kimi-code") {
+		t.Errorf("single-member group should use the singular noun:\n%s", out)
+	}
+	// The two merged rows must sit under the first header, before the second.
+	firstHdr := strings.Index(out, "── "+shared)
+	secondHdr := strings.LastIndex(out, "\n── ")
+	if firstHdr < 0 || secondHdr < 0 || firstHdr > secondHdr {
+		t.Fatalf("unexpected group layout:\n%s", out)
+	}
+	if !strings.Contains(out[firstHdr:secondHdr], "from kimi") ||
+		!strings.Contains(out[firstHdr:secondHdr], "from opencode") {
+		t.Fatalf("both merged rows must sit under the shared header:\n%s", out)
+	}
+}
+
+func TestIndexGroupedEmptyAndUnknown(t *testing.T) {
+	if got := IndexGrouped(nil); got != "(no sessions)" {
+		t.Errorf("empty grouped index = %q", got)
+	}
+	// A session with no directory and no native id lands under a header that
+	// does not pretend to have a workspace.
+	out := IndexGrouped([]session.Session{{Source: "kimi-code", SessionID: "x"}})
+	if !strings.Contains(out, "── (no workspace)") {
+		t.Errorf("unknown workspace header missing:\n%s", out)
 	}
 }
 
@@ -74,5 +118,14 @@ func TestRenderersFlagMissingWorkingDirectory(t *testing.T) {
 	}
 	if box := FullBox(&alive); strings.Contains(box, "directory no longer exists") {
 		t.Errorf("a session whose cwd exists must not be flagged:\n%s", box)
+	}
+
+	// The grouped header identifies the workspace by its (stale) directory, so
+	// it must carry the deleted marker too.
+	if grp := IndexGrouped([]session.Session{gone}); !strings.Contains(grp, textutil.DirDeletedLabel) {
+		t.Errorf("grouped header should mark the deleted workspace:\n%s", grp)
+	}
+	if grp := IndexGrouped([]session.Session{alive}); strings.Contains(grp, textutil.DirDeletedLabel) {
+		t.Errorf("grouped header for an existing directory must not be flagged:\n%s", grp)
 	}
 }

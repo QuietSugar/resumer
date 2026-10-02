@@ -1,3 +1,0 @@
-{"timestamp":"2026-04-15T07:00:00.000Z","type":"session_meta","payload":{"id":"019cccc3-3333-7000-8000-000000000003","timestamp":"2026-04-15T07:00:00.000Z","cwd":"/tmp/resumer-fixtures/codex-three","originator":"codex-vscode","cli_version":"0.120.0"}}
-{"timestamp":"2026-04-15T07:00:10.000Z","type":"event_msg","payload":{"type":"user_message","message":"codex fixture three prompt","images":[]}}
-{"timestamp":"2026-04-15T07:00:20.000Z","type":"event_msg","payload":{"type":"task_complete"}}

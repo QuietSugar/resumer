@@ -27,8 +27,8 @@ func TestLoadMissingFileIsEmpty(t *testing.T) {
 func TestSaveLoadRoundTrip(t *testing.T) {
 	p := setPath(t)
 	var c Config
+	c.Disable("codebuddy")
 	c.Disable("opencode")
-	c.Disable("codex")
 	c.Disable("opencode") // idempotent
 	if err := Save(c); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -37,10 +37,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(got.Disabled) != 2 || got.Disabled[0] != "codex" || got.Disabled[1] != "opencode" {
+	if len(got.Disabled) != 2 || got.Disabled[0] != "codebuddy" || got.Disabled[1] != "opencode" {
 		t.Errorf("round-trip = %+v", got.Disabled)
 	}
-	if !got.IsDisabled("opencode") || got.IsDisabled("claude-code") {
+	if !got.IsDisabled("opencode") || got.IsDisabled("kimi-code") {
 		t.Errorf("IsDisabled wrong: %+v", got)
 	}
 	// Parent dirs were created on demand.
@@ -51,10 +51,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 func TestEnableRemovesEntry(t *testing.T) {
 	var c Config
+	c.Disable("codebuddy")
 	c.Disable("opencode")
-	c.Disable("codex")
-	c.Enable("opencode")
-	if c.IsDisabled("opencode") || !c.IsDisabled("codex") {
+	c.Enable("codebuddy")
+	if c.IsDisabled("codebuddy") || !c.IsDisabled("opencode") {
 		t.Errorf("after Enable: %+v", c.Disabled)
 	}
 	c.Enable("not-there") // no-op

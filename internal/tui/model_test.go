@@ -87,6 +87,130 @@ func TestRowDelegateRendersTitleWithoutFirstPrompt(t *testing.T) {
 	}
 }
 
+// groupedModel builds a picker over three sessions in two workspaces (one of
+// them shared by two providers) without running a scan.
+func groupedModel(t *testing.T) Model {
+	t.Helper()
+	t.Setenv("RESUMER_TIPS_FILE", filepath.Join(t.TempDir(), "missing-tips.md"))
+	m := NewModel(nil, session.Filters{})
+	m.width, m.height = 120, 40
+	m.resize()
+	m.all = []session.Session{
+		{Source: "kimi-code", SessionID: "k1", Cwd: "/ws/a", ProjectLabel: "a", Title: "a1", LastTS: "2026-09-29T10:00:00Z"},
+		{Source: "opencode", SessionID: "o1", Cwd: "/ws/a", ProjectLabel: "a", Title: "a2", LastTS: "2026-09-29T09:00:00Z"},
+		{Source: "kimi-code", SessionID: "k2", Cwd: "/ws/b", ProjectLabel: "b", Title: "b1", LastTS: "2026-09-29T08:00:00Z"},
+	}
+	m.applyItems()
+	return m
+}
+
+func TestSessionListGroupsByWorkspace(t *testing.T) {
+	m := groupedModel(t)
+	if m.workspaces != 2 {
+		t.Fatalf("workspaces = %d, want 2", m.workspaces)
+	}
+	items := m.list.Items()
+	hdr, ok := items[0].(groupHeaderItem)
+	if !ok {
+		t.Fatalf("first item should be a workspace header, got %T", items[0])
+	}
+	if hdr.count != 2 || hdr.path != "/ws/a" {
+		t.Errorf("merged header = %+v, want 2 sessions under /ws/a", hdr)
+	}
+	// selectable must point only at session rows, never headers.
+	if len(m.selectable) != 3 {
+		t.Fatalf("selectable = %v, want 3 session rows", m.selectable)
+	}
+	for _, idx := range m.selectable {
+		if _, ok := items[idx].(sessionItem); !ok {
+			t.Errorf("selectable[%d] = %T, want sessionItem", idx, items[idx])
+		}
+	}
+	if view := m.View(); !strings.Contains(view, "3 sessions · 2 workspaces") {
+		t.Errorf("status line should count sessions and workspaces:\n%s", view)
+	}
+}
+
+func TestNavigationSkipsGroupHeaders(t *testing.T) {
+	m := groupedModel(t)
+	m.list.Select(m.selectable[0])
+	for _, key := range []tea.KeyType{tea.KeyDown, tea.KeyDown, tea.KeyDown, tea.KeyDown} {
+		updated, _ := m.Update(tea.KeyMsg{Type: key})
+		m = updated.(Model)
+		if _, ok := m.list.SelectedItem().(sessionItem); !ok {
+			t.Fatalf("down navigation landed on %T, want a session", m.list.SelectedItem())
+		}
+	}
+	for i := 0; i < 5; i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m = updated.(Model)
+		if _, ok := m.list.SelectedItem().(sessionItem); !ok {
+			t.Fatalf("up navigation landed on %T, want a session", m.list.SelectedItem())
+		}
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	m = updated.(Model)
+	if it, ok := m.list.SelectedItem().(sessionItem); !ok || it.s.SessionID != "k2" {
+		t.Fatalf("End should select the last session, got %T", m.list.SelectedItem())
+	}
+}
+
+func TestGroupHeaderIsNotFilterable(t *testing.T) {
+	if got := (groupHeaderItem{path: "x", count: 2}).FilterValue(); got != "" {
+		t.Errorf("group header FilterValue = %q, want empty so filters drop it", got)
+	}
+}
+
+func TestSelectionPreservedAcrossSortToggle(t *testing.T) {
+	m := groupedModel(t)
+	m.list.Select(m.selectable[1]) // o1
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(Model)
+	it, ok := m.list.SelectedItem().(sessionItem)
+	if !ok || it.s.SessionID != "o1" {
+		t.Fatalf("sort toggle lost selection: got %T %+v", m.list.SelectedItem(), m.list.SelectedItem())
+	}
+}
+
+// Toggling sort while a filter is active rebuilds the list; the selection must
+// survive even though SetItems defers re-filtering to an async message.
+func TestSelectionPreservedWhenSortingUnderFilter(t *testing.T) {
+	m := groupedModel(t)
+	m.list.SetFilterText("a") // synchronous fuzzy match → FilterApplied
+	if m.list.FilterState() != list.FilterApplied {
+		t.Fatalf("filter state = %v, want FilterApplied", m.list.FilterState())
+	}
+	m.restoreSelection("k1", "kimi-code")
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("applyItems must return the list's re-filter command")
+	}
+	if msg := cmd(); msg != nil {
+		updated, _ = m.Update(msg)
+		m = updated.(Model)
+	}
+	it, ok := m.list.SelectedItem().(sessionItem)
+	if !ok || it.s.SessionID != "k1" {
+		t.Fatalf("selection lost across sort under filter: got %T %+v", m.list.SelectedItem(), m.list.SelectedItem())
+	}
+}
+
+// The workspace holding the newest session must stay first, even after
+// toggling the session sort to ascending.
+func TestWorkspaceOrderFollowsNewestSession(t *testing.T) {
+	m := groupedModel(t)
+	if h, ok := m.list.Items()[0].(groupHeaderItem); !ok || h.path != "/ws/a" {
+		t.Fatalf("default first header = %#v, want workspace /ws/a (newest)", m.list.Items()[0])
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(Model)
+	if h, ok := m.list.Items()[0].(groupHeaderItem); !ok || h.path != "/ws/a" {
+		t.Fatalf("ascending sort must keep the newest workspace first, got %#v", m.list.Items()[0])
+	}
+}
+
 func TestTipsPaneUsesSelectedProviderAndAdaptsToWidth(t *testing.T) {
 	t.Setenv("RESUMER_TIPS_FILE", filepath.Join(t.TempDir(), "missing-tips.md"))
 	m := NewModel([]provider.Provider{&refreshProvider{}}, session.Filters{})
@@ -134,7 +258,7 @@ func TestTipsForSourceExplainsProviderSpecificDeletion(t *testing.T) {
 	if got := tipsForSource("kimi-code"); !strings.Contains(got, "Ctrl+X") {
 		t.Fatalf("Kimi tips are missing picker shortcut: %q", got)
 	}
-	if got := tipsForSource("codex"); !strings.Contains(got, "differ by Agent/version") {
+	if got := tipsForSource("unknown-agent"); !strings.Contains(got, "differ by Agent/version") {
 		t.Fatalf("generic tips should warn that deletion differs: %q", got)
 	}
 	codeBuddyTips := tipsForSource("codebuddy")
@@ -175,7 +299,7 @@ func TestColumnHeaderAlignsWithRowColumns(t *testing.T) {
 	(rowDelegate{}).Render(&row, m, 0, item)
 
 	head := ColumnHeader()
-	for _, label := range []string{"age", "src", "project", "title"} {
+	for _, label := range []string{"age", "agent", "title"} {
 		if !strings.Contains(head, label) {
 			t.Errorf("column header is missing the %q label: %q", label, head)
 		}
@@ -204,7 +328,7 @@ func TestColumnHeaderAlignsWithRowColumns(t *testing.T) {
 	}
 	h, r := plain(head), plain(row.String())
 	for _, pair := range [][2]string{
-		{"project", "project"},          // header label vs the project value
+		{"agent", "kimi-code"},          // header label vs the full agent name
 		{"title", "A distinct session"}, // header label vs the title value
 	} {
 		hc, rc := colOf(h, pair[0]), colOf(r, pair[1])

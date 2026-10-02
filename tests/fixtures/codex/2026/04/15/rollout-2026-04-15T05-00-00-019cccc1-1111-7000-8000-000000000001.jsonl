@@ -1,6 +1,0 @@
-{"timestamp":"2026-04-15T05:00:00.000Z","type":"session_meta","payload":{"id":"019cccc1-1111-7000-8000-000000000001","timestamp":"2026-04-15T05:00:00.000Z","cwd":"/tmp/resumer-fixtures/codex-one","originator":"codex-tui","cli_version":"0.120.0","source":"cli","model_provider":"openai","git":{"branch":"main","commit_hash":"deadbeef"}}}
-{"timestamp":"2026-04-15T05:00:05.000Z","type":"event_msg","payload":{"type":"task_started"}}
-{"timestamp":"2026-04-15T05:00:06.000Z","type":"event_msg","payload":{"type":"user_message","message":"codex fixture one first prompt","images":[]}}
-{"timestamp":"2026-04-15T05:00:30.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"reply body"}]}}
-{"timestamp":"2026-04-15T05:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"codex fixture one second prompt","images":[]}}
-{"timestamp":"2026-04-15T05:01:10.000Z","type":"event_msg","payload":{"type":"task_complete"}}

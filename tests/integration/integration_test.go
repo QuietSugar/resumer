@@ -1,7 +1,7 @@
 // Package integration runs the built resumer binary against the fixture set,
 // porting the old shell assertion scenarios (08 unified render, 10 missing
 // provider, 12 stale-cwd exec). The TUI scenarios drive a real PTY, so the
-// full path — picker → filter → enter → chdir → exec of the mock claude —
+// full path — picker → filter → enter → chdir → exec of the mock agent —
 // is proven without tmux.
 package integration
 
@@ -55,11 +55,7 @@ func fixtureEnv(t *testing.T) []string {
 		"PATH=" + mockBin + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
 		"TERM=xterm-256color",
-		"RESUMER_CLAUDE_PROJECT_ROOT=" + filepath.Join(repoRoot, "tests", "fixtures", "claude-code"),
 		"RESUMER_CODEBUDDY_HOME=" + filepath.Join(repoRoot, "tests", "fixtures", "codebuddy"),
-		"RESUMER_CODEX_SESSION_ROOT=" + filepath.Join(repoRoot, "tests", "fixtures", "codex"),
-		"RESUMER_CODEX_INDEX_FILE=" + filepath.Join(repoRoot, "tests", "fixtures", "codex", "session_index.jsonl"),
-		"RESUMER_CODEX_BIN=codex",
 		"RESUMER_KIMI_HOME=" + filepath.Join(repoRoot, "tests", "fixtures", "kimi-home"),
 		"RESUMER_KIMI_BIN=kimi",
 		"RESUMER_OPENCODE_DATA=" + filepath.Join(repoRoot, "tests", "fixtures", "opencode-home"),
@@ -76,16 +72,11 @@ func fixtureEnv(t *testing.T) []string {
 func materializeFixtureCwds(t *testing.T) {
 	t.Helper()
 	for _, d := range []string{
-		"/tmp/resumer-fixtures/alpha",
-		"/tmp/resumer-fixtures/beta",
 		"/tmp/resumer-fixtures/codebuddy-alpha",
-		"/tmp/resumer-fixtures/codex-one",
-		"/tmp/resumer-fixtures/codex-two",
-		"/tmp/resumer-fixtures/codex-three",
-		"/tmp/resumer-fixtures/codex-four",
 		"/tmp/resumer-fixtures/obsidian path with space/vault",
 		"/tmp/resumer-fixtures/kimi-one",
 		"/tmp/resumer-fixtures/kimi-two",
+		"/tmp/resumer-fixtures/kimi-empty",
 		"/tmp/resumer-fixtures/oc-one",
 		"/tmp/resumer-fixtures/oc-two",
 		"/tmp/resumer-fixtures/oc-three",
@@ -100,17 +91,17 @@ func materializeFixtureCwds(t *testing.T) {
 // --- 08: unified render ---
 
 func TestUnifiedRender(t *testing.T) {
-	// Realistic machine: the fixture projects exist, so rows show their names.
-	// kimi-four is the deliberate exception (its dir is never created).
+	// Flat table (--no-group) so the pinned row positions stay stable; the
+	// default grouped layout is covered by TestGroupedRender.
 	materializeFixtureCwds(t)
-	cmd := exec.Command(binPath, "list", "--all")
+	cmd := exec.Command(binPath, "list", "--all", "--no-group")
 	cmd.Env = fixtureEnv(t)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("list --all failed: %v", err)
 	}
 	s := string(out)
-	for _, want := range []string{"[cc]", "[cb]", "[codex]", " alpha ", " beta "} {
+	for _, want := range []string{"[cb]", "[kimi]", "[oc]"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -125,14 +116,53 @@ func TestUnifiedRender(t *testing.T) {
 		t.Fatalf("unexpectedly short output: %d lines", len(lines))
 	}
 	// Header(1) + divider(2); first data row must be the most recent fixture:
-	// codex-three at 07:00 beats every cc row (≤ 04:30).
+	// kimi-two at 06:32 beats every other row.
 	firstRow := lines[2]
-	if !strings.Contains(firstRow, "codex-three") || !strings.Contains(firstRow, "[codex]") {
-		t.Errorf("top row should be codex-three with [codex] badge: %q", firstRow)
+	if !strings.Contains(firstRow, "kimi-two") || !strings.Contains(firstRow, "[kimi]") {
+		t.Errorf("top row should be kimi-two with [kimi] badge: %q", firstRow)
 	}
 	lastRow := lines[len(lines)-1]
-	if !strings.Contains(lastRow, " alpha ") || !strings.Contains(lastRow, "plain fixture") {
-		t.Errorf("last row should be oldest cc alpha session: %q", lastRow)
+	if !strings.Contains(lastRow, "Kimi ISO No-Wire") {
+		t.Errorf("last row should be the oldest fixture (kimi ISO no-wire): %q", lastRow)
+	}
+}
+
+// TestGroupedRender verifies the default `list` output groups rows under
+// workspace headers while preserving every session row verbatim.
+func TestGroupedRender(t *testing.T) {
+	materializeFixtureCwds(t)
+	run := func(args ...string) string {
+		cmd := exec.Command(binPath, args...)
+		cmd.Env = fixtureEnv(t)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("%v failed: %v", args, err)
+		}
+		return string(out)
+	}
+
+	grouped := run("list", "--all")
+	flat := run("list", "--all", "--no-group")
+
+	if !strings.Contains(grouped, "── ") {
+		t.Fatalf("grouped output has no workspace headers:\n%s", grouped)
+	}
+	// A workspace header must mark the deleted directory, not only the row.
+	if !strings.Contains(grouped, textutil.DirDeletedLabel) {
+		t.Errorf("grouped output should flag the deleted workspace:\n%s", grouped)
+	}
+	// Every flat session row must survive verbatim inside the grouped output.
+	flatLines := strings.Split(strings.TrimRight(flat, "\n"), "\n")
+	if len(flatLines) < 3 {
+		t.Fatalf("flat output unexpectedly short: %d lines", len(flatLines))
+	}
+	for _, row := range flatLines[2:] {
+		if row == "" {
+			continue
+		}
+		if !strings.Contains(grouped, row) {
+			t.Errorf("grouped output dropped/altered session row: %q", row)
+		}
 	}
 }
 
@@ -141,8 +171,8 @@ func TestUnifiedRender(t *testing.T) {
 func TestMissingProvider(t *testing.T) {
 	env := fixtureEnv(t)
 	for i, e := range env {
-		if strings.HasPrefix(e, "RESUMER_CODEX_SESSION_ROOT=") {
-			env[i] = "RESUMER_CODEX_SESSION_ROOT=/nonexistent/resumer-qa-missing"
+		if strings.HasPrefix(e, "RESUMER_OPENCODE_DATA=") {
+			env[i] = "RESUMER_OPENCODE_DATA=/nonexistent/resumer-qa-missing"
 		}
 	}
 
@@ -150,25 +180,25 @@ func TestMissingProvider(t *testing.T) {
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("merged list must exit 0 with claude-only providers: %v", err)
+		t.Fatalf("merged list must exit 0 with the remaining providers: %v", err)
 	}
-	if !strings.Contains(string(out), "[cc]") {
-		t.Error("output should have [cc] rows")
+	if !strings.Contains(string(out), "[cb]") {
+		t.Error("output should have [cb] rows")
 	}
-	if strings.Contains(string(out), "[codex]") {
-		t.Error("output must have no [codex] rows")
+	if strings.Contains(string(out), "[oc]") {
+		t.Error("output must have no [oc] rows")
 	}
 
-	cmd2 := exec.Command(binPath, "list", "--source=codex", "--all")
+	cmd2 := exec.Command(binPath, "list", "--source=opencode", "--all")
 	cmd2.Env = env
 	var stderr strings.Builder
 	cmd2.Stderr = &stderr
 	err2 := cmd2.Run()
 	ee, ok := err2.(*exec.ExitError)
 	if !ok || ee.ExitCode() != 2 {
-		t.Fatalf("--source=codex must exit 2 when unavailable, got %v", err2)
+		t.Fatalf("--source=opencode must exit 2 when unavailable, got %v", err2)
 	}
-	if !strings.Contains(stderr.String(), "codex provider not available") {
+	if !strings.Contains(stderr.String(), "opencode provider not available") {
 		t.Errorf("stderr should carry provider-specific message: %q", stderr.String())
 	}
 }
@@ -283,11 +313,11 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) string {
 
 func TestStaleCwdExec(t *testing.T) {
 	materializeFixtureCwds(t)
-	logPath := filepath.Join(t.TempDir(), "claude-mock.log")
-	env := append(fixtureEnv(t), "CLAUDE_MOCK_LOG="+logPath)
+	logPath := filepath.Join(t.TempDir(), "codebuddy-mock.log")
+	env := append(fixtureEnv(t), "CODEBUDDY_MOCK_LOG="+logPath)
 
-	r := startPicker(t, env, "--source=claude-code", "--all")
-	r.waitFor(t, "[cc]", 5*time.Second)
+	r := startPicker(t, env, "--source=codebuddy", "--all")
+	r.waitFor(t, "codebuddy", 5*time.Second)
 
 	// Filter down to the stale-cwd fixture, apply, select.
 	r.send("/stale cwd regression")
@@ -298,14 +328,14 @@ func TestStaleCwdExec(t *testing.T) {
 	r.waitExit(t, 5*time.Second)
 
 	log := waitForFile(t, logPath, 5*time.Second)
-	t.Logf("mock claude log: %s", strings.TrimSpace(log))
+	t.Logf("mock codebuddy log: %s", strings.TrimSpace(log))
 
 	pwdRE := regexp.MustCompile(`pwd=(/private)?/tmp/resumer-fixtures/obsidian path with space/vault`)
 	if !pwdRE.MatchString(log) {
 		t.Errorf("expected walk to real vault path, log: %q", log)
 	}
-	if !strings.Contains(log, "args=--resume dddddddd-0006-4000-8000-000000000006") {
-		t.Errorf("expected claude --resume with correct uuid, log: %q", log)
+	if !strings.Contains(log, "args=--resume cb222222-2222-4222-8222-222222222222") {
+		t.Errorf("expected codebuddy --resume with correct uuid, log: %q", log)
 	}
 	if strings.Contains(log, "pwd=/bogus/wrong/path") {
 		t.Error("pwd ended at stored bogus cwd — stale-cwd fix not applied")
@@ -316,11 +346,13 @@ func TestStaleCwdExec(t *testing.T) {
 
 func TestPickerCancelLeavesNoLog(t *testing.T) {
 	materializeFixtureCwds(t)
-	logPath := filepath.Join(t.TempDir(), "claude-mock.log")
-	env := append(fixtureEnv(t), "CLAUDE_MOCK_LOG="+logPath)
+	logPath := filepath.Join(t.TempDir(), "codebuddy-mock.log")
+	env := append(fixtureEnv(t), "CODEBUDDY_MOCK_LOG="+logPath)
 
 	r := startPicker(t, env, "--all")
-	r.waitFor(t, "[cc]", 5*time.Second)
+	// Wait for any rendered row; the grouped list only shows the most recent
+	// page, so the oldest fixtures are off-screen here.
+	r.waitFor(t, "kimi-code", 5*time.Second)
 	r.send("\x1b") // esc → cancel
 	r.waitExit(t, 5*time.Second)
 
@@ -333,32 +365,30 @@ func TestPickerCancelLeavesNoLog(t *testing.T) {
 
 func TestSortToggleAndSourceCycle(t *testing.T) {
 	materializeFixtureCwds(t)
-	logPath := filepath.Join(t.TempDir(), "claude-mock.log")
-	env := append(fixtureEnv(t), "CLAUDE_MOCK_LOG="+logPath)
+	logPath := filepath.Join(t.TempDir(), "codebuddy-mock.log")
+	env := append(fixtureEnv(t), "CODEBUDDY_MOCK_LOG="+logPath)
 
 	r := startPicker(t, env, "--all")
-	r.waitFor(t, "[codex]", 5*time.Second)
+	r.waitFor(t, "kimi-code", 5*time.Second)
 
 	// ctrl-s twice (asc → desc again), tab through sources and back to all.
 	r.send("\x13") // ctrl+s
 	time.Sleep(200 * time.Millisecond)
 	r.send("\x13")
 	time.Sleep(200 * time.Millisecond)
-	r.send("\t") // → claude-code only
-	time.Sleep(200 * time.Millisecond)
-	r.waitFor(t, "source: claude-code", 3*time.Second)
 	r.send("\t") // → codebuddy only
 	time.Sleep(200 * time.Millisecond)
 	r.waitFor(t, "source: codebuddy", 3*time.Second)
-	r.send("\t") // → codex only
+	r.send("\t") // → kimi-code only
 	time.Sleep(200 * time.Millisecond)
-	r.waitFor(t, "source: codex", 3*time.Second)
-	// Continue through Kimi and OpenCode, then return to all sources.
-	for _, want := range []string{"kimi-code", "opencode", "all"} {
-		r.send("\t")
-		time.Sleep(150 * time.Millisecond)
-		r.waitFor(t, "source: "+want, 3*time.Second)
-	}
+	r.waitFor(t, "source: kimi-code", 3*time.Second)
+	r.send("\t") // → opencode only
+	time.Sleep(200 * time.Millisecond)
+	r.waitFor(t, "source: opencode", 3*time.Second)
+	// Return to all sources.
+	r.send("\t")
+	time.Sleep(150 * time.Millisecond)
+	r.waitFor(t, "source: all", 3*time.Second)
 
 	// Toggling must leave the picker functional and must not exec anything;
 	// exec behavior itself is covered by the dedicated tests above.
@@ -370,25 +400,6 @@ func TestSortToggleAndSourceCycle(t *testing.T) {
 	}
 }
 
-// --- codex selection end-to-end ---
-
-func TestCodexSelectExec(t *testing.T) {
-	materializeFixtureCwds(t)
-	logPath := filepath.Join(t.TempDir(), "codex-mock.log")
-	env := append(fixtureEnv(t), "CODEX_MOCK_LOG="+logPath)
-
-	r := startPicker(t, env, "--source=codex", "--all")
-	r.waitFor(t, "[codex]", 5*time.Second)
-	// Top row is the most recent codex session (codex-three). Select it.
-	r.send("\r")
-	r.waitExit(t, 5*time.Second)
-
-	log := waitForFile(t, logPath, 5*time.Second)
-	if !strings.Contains(log, "args=resume 019cccc3-3333-7000-8000-000000000003") {
-		t.Errorf("expected codex resume of most-recent session, log: %q", log)
-	}
-}
-
 // --- codebuddy selection end-to-end ---
 
 func TestCodeBuddySelectExec(t *testing.T) {
@@ -396,8 +407,10 @@ func TestCodeBuddySelectExec(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "codebuddy-mock.log")
 	env := append(fixtureEnv(t), "CODEBUDDY_MOCK_LOG="+logPath)
 
-	r := startPicker(t, env, "--source=codebuddy", "--all")
-	r.waitFor(t, "[cb]", 5*time.Second)
+	// --project narrows to the alpha session; the vault session (newest
+	// codebuddy row) carries a bogus cwd and is covered by TestStaleCwdExec.
+	r := startPicker(t, env, "--source=codebuddy", "--all", "--project", "codebuddy-alpha")
+	r.waitFor(t, "codebuddy", 5*time.Second)
 	r.send("\r")
 	r.waitExit(t, 5*time.Second)
 
@@ -418,7 +431,7 @@ func TestKimiSelectExec(t *testing.T) {
 	env := append(fixtureEnv(t), "KIMI_MOCK_LOG="+logPath)
 
 	r := startPicker(t, env, "--source=kimi-code", "--all")
-	r.waitFor(t, "[kimi]", 5*time.Second)
+	r.waitFor(t, "kimi-code", 5*time.Second)
 	// Top row is the most recent kimi session (kimi-two, 06:32). Select it;
 	// exec must chdir into the workDir recorded in session_index.jsonl.
 	r.send("\r")
@@ -442,7 +455,7 @@ func TestOpenCodeSelectExec(t *testing.T) {
 	env := append(fixtureEnv(t), "OPENCODE_MOCK_LOG="+logPath)
 
 	r := startPicker(t, env, "--source=opencode", "--all")
-	r.waitFor(t, "[oc]", 5*time.Second)
+	r.waitFor(t, "opencode", 5*time.Second)
 	// Top row is ses_ddd (06:21, oc-three) — newest visible opencode session
 	// (archived and child fixtures are filtered out).
 	r.send("\r")
